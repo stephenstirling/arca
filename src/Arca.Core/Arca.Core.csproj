@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Arca.Core</RootNamespace>
+    <AssemblyName>Arca.Core</AssemblyName>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Version>0.1.0</Version>
+    <Authors>Stephen Stirling</Authors>
+    <Company>Stephen Stirling</Company>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Arca.Core.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reads ZIP, 7z, RAR/RAR5, TAR (+gz/bz2/xz) in managed code. RAR is read with SharpCompress's own
+         reader, so no RARLAB UnRAR source or licence terms come into it. -->
+    <PackageReference Include="SharpCompress" Version="0.38.0" />
+  </ItemGroup>
+</Project>

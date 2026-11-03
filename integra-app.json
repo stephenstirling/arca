@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "id": "arca",
+  "name": "Arca",
+  "publisher": "Stephen Stirling",
+  "repo": "stephenstirling/arca",
+  "assetPattern": "Arca-*-win-x64.zip",
+  "checksumAsset": "SHA256SUMS.txt",
+  "signerThumbprint": "0000000000000000000000000000000000000000",
+  "exe": "Arca.exe",
+  "minWindows": "10.0.22000",
+  "arch": "x64",
+  "installDir": "%LocalAppData%\\Programs\\Arca",
+  "dataDir": "%LocalAppData%\\Arca",
+  "stopCommand": "Arca.exe --quit",
+  "uninstall": {
+    "stop": true,
+    "removeDirs": ["installDir"],
+    "keepData": true,
+    "note": "Arca.exe --quit closes every open Arca window"
+  }
+}

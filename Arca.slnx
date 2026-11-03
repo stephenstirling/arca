@@ -1,0 +1,19 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Project Path="src/Arca/Arca.csproj">
+    <Platform Solution="*|x64" Project="x64" />
+  </Project>
+  <Project Path="src/Arca.Core/Arca.Core.csproj">
+    <Platform Solution="*|x64" Project="AnyCPU" />
+  </Project>
+  <Project Path="tests/Arca.Core.Tests/Arca.Core.Tests.csproj">
+    <Platform Solution="*|x64" Project="AnyCPU" />
+  </Project>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+    <File Path="CLAUDE.md" />
+    <File Path="integra-app.json" />
+  </Folder>
+</Solution>

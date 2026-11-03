@@ -1,0 +1,26 @@
+name: Build
+
+# Build only: catches a broken build before merging. No signing, no release, no secrets.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          dotnet-version: 8.0.x
+
+      # Same publish as the release, so a problem there shows up here first.
+      - name: Publish (self-contained, win-x64)
+        run: dotnet publish src/Arca -c Release -r win-x64 --self-contained true -o "${{ runner.temp }}/arca-build"
+
+      # The core library (formats, path safety, zip-bomb limits) is plain .NET, so its tests run here too.
+      - name: Test
+        run: dotnet test tests/Arca.Core.Tests -c Release

@@ -1,0 +1,137 @@
+name: Release
+
+# Push a tag like v0.1.0 to build, sign and publish a release.
+# A tag named dryrun-<anything> does everything except publishing (the zip is kept as a workflow artifact instead).
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'dryrun-*'
+  workflow_dispatch:   # manual dry run, from the Actions tab (works once this file is on main)
+
+permissions:
+  contents: write        # create the release
+  id-token: write        # build-provenance attestation
+  attestations: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0   # full history for the release notes and the "is on main" check
+
+      - name: Work out the version
+        id: ver
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          $publish = $false; $pre = $false
+          if ($env:REF_TYPE -eq 'tag' -and $env:REF_NAME -match '^v(\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?)$') {
+            $version = $Matches[1]; $publish = $true; $pre = [bool]$Matches[2]
+          } elseif ($env:REF_TYPE -eq 'tag' -and $env:REF_NAME -like 'dryrun-*') {
+            $version = "0.0.0-dryrun.$env:RUN_NUMBER"
+          } elseif ($env:REF_TYPE -eq 'branch') {
+            $version = "0.0.0-dryrun.$env:RUN_NUMBER"
+          } else {
+            throw "Tag '$env:REF_NAME' is not like v1.2.3 (or v1.2.3-beta.1)."
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "publish=$($publish.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "prerelease=$($pre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          Write-Host "Version $version, publish=$publish"
+
+      - name: Check the tag is on main
+        if: steps.ver.outputs.publish == 'true'
+        run: |
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw 'This tag is not on main. Merge your work to main first, then tag main.' }
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6.0.0
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build, sign and zip
+        env:
+          PFX_BASE64: ${{ secrets.ARCA_SIGNING_PFX_BASE64 }}
+          ARCA_PFX_PASSWORD: ${{ secrets.ARCA_SIGNING_PFX_PASSWORD }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          if (-not $env:PFX_BASE64 -or -not $env:ARCA_PFX_PASSWORD) {
+            throw 'The signing secrets are missing. Add ARCA_SIGNING_PFX_BASE64 and ARCA_SIGNING_PFX_PASSWORD (Settings > Secrets and variables > Actions).'
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'arca-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:PFX_BASE64.Trim()))
+          ./tools/Build-Release.ps1 -Version $env:VERSION -OutDir (Join-Path $env:RUNNER_TEMP 'release') -PfxPath $pfx
+
+      - name: Remove the signing key from the runner
+        if: always()
+        run: Remove-Item (Join-Path $env:RUNNER_TEMP 'arca-signing.pfx') -Force -ErrorAction SilentlyContinue
+
+      - name: Check integra-app.json against the build
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          PUBLISH: ${{ steps.ver.outputs.publish }}
+          REF_NAME: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        run: |
+          $tag = if ($env:PUBLISH -eq 'true') { $env:REF_NAME } else { "v$env:VERSION" }   # a dry run has no real tag
+          ./tools/New-IntegraManifest.ps1 -Version $env:VERSION -Tag $tag -Repo $env:REPO -ReleaseDir (Join-Path $env:RUNNER_TEMP 'release')
+
+      - name: Check the README shows this certificate's thumbprint
+        id: cert
+        run: |
+          $cer = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 -ArgumentList (Join-Path $env:RUNNER_TEMP 'release/Arca-signing.cer')
+          $thumb = $cer.Thumbprint
+          if ((Get-Content README.md -Raw) -notmatch [regex]::Escape($thumb)) {
+            throw "README.md does not mention the signing certificate thumbprint $thumb. Put it in the Download section, merge, and tag again."
+          }
+          "thumbprint=$thumb" >> $env:GITHUB_OUTPUT
+
+      - name: Write the release notes
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          THUMBPRINT: ${{ steps.cert.outputs.thumbprint }}
+          PUBLISH: ${{ steps.ver.outputs.publish }}
+        run: |
+          $notesArgs = @{ Version = $env:VERSION; Thumbprint = $env:THUMBPRINT; OutFile = (Join-Path $env:RUNNER_TEMP 'release-notes.md'); Repo = $env:GITHUB_REPOSITORY }
+          if ($env:PUBLISH -eq 'true') { $notesArgs.FromParent = $true }   # the release tag sits on this commit
+          ./tools/New-ReleaseNotes.ps1 @notesArgs
+          Get-Content (Join-Path $env:RUNNER_TEMP 'release-notes.md') | Out-File $env:GITHUB_STEP_SUMMARY -Append
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/release/Arca-${{ steps.ver.outputs.version }}-win-x64.zip
+
+      - name: Publish the release
+        if: steps.ver.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          PRERELEASE: ${{ steps.ver.outputs.prerelease }}
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP 'release'
+          $flags = @()
+          if ($env:PRERELEASE -eq 'true') { $flags += '--prerelease' }
+          gh release create $env:TAG --verify-tag --title "Arca $env:VERSION" `
+            --notes-file (Join-Path $env:RUNNER_TEMP 'release-notes.md') @flags `
+            (Join-Path $dir "Arca-$env:VERSION-win-x64.zip") (Join-Path $dir 'SHA256SUMS.txt') (Join-Path $dir 'Arca-signing.cer') (Join-Path $dir 'integra-app.json')
+          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
+
+      - name: Keep the files (dry run only)
+        if: steps.ver.outputs.publish != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: dry-run-${{ steps.ver.outputs.version }}
+          path: |
+            ${{ runner.temp }}/release/*
+            ${{ runner.temp }}/release-notes.md
+          retention-days: 7

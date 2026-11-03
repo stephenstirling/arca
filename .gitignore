@@ -1,0 +1,11 @@
+bin/
+obj/
+.vs/
+*.user
+
+# Code-signing keys: never commit
+*.pfx
+*.p12
+*.snk
+Arca-signing*
+*password*.txt
