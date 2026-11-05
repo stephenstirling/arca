@@ -6,50 +6,299 @@
     xmlns:local="using:Arca">
 
     <Grid x:Name="Root" AllowDrop="True" DragOver="Root_DragOver" Drop="Root_Drop"
-          Padding="24" RowSpacing="12" Background="Transparent">
+          Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
+        <Grid.Resources>
+            <!-- Icon-over-label toolbar button, like WinRAR's -->
+            <Style x:Key="ToolButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="8,6,8,4" />
+                <Setter Property="MinWidth" Value="76" />
+                <Setter Property="MinHeight" Value="64" />
+                <Setter Property="VerticalAlignment" Value="Stretch" />
+            </Style>
+            <Style x:Key="ToolIconStyle" TargetType="FontIcon">
+                <Setter Property="FontSize" Value="24" />
+                <Setter Property="Foreground" Value="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+            </Style>
+            <Style x:Key="ToolLabelStyle" TargetType="TextBlock">
+                <Setter Property="FontSize" Value="12" />
+                <Setter Property="HorizontalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="0,4,0,0" />
+            </Style>
+            <!-- Column header: a flat button that sorts -->
+            <Style x:Key="HeaderButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Padding" Value="4,6" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+            </Style>
+        </Grid.Resources>
+
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
+            <RowDefinition Height="36" />   <!-- title bar -->
+            <RowDefinition Height="Auto" /> <!-- menu -->
+            <RowDefinition Height="Auto" /> <!-- toolbar -->
+            <RowDefinition Height="Auto" /> <!-- path bar -->
+            <RowDefinition Height="Auto" /> <!-- messages -->
+            <RowDefinition Height="*" />    <!-- file list -->
+            <RowDefinition Height="Auto" /> <!-- status bar -->
         </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="12">
-            <TextBlock Text="Arca" Style="{StaticResource TitleTextBlockStyle}" VerticalAlignment="Center" />
-            <Button x:Name="OpenButton" Content="Open archive" Click="OpenButton_Click" />
-            <Button x:Name="ExtractButton" Content="Extract all…" Click="ExtractButton_Click" IsEnabled="False"
-                    Style="{StaticResource AccentButtonStyle}" />
-            <TextBlock x:Name="SummaryText" VerticalAlignment="Center" Opacity="0.7" />
-        </StackPanel>
-
-        <InfoBar x:Name="Bar" Grid.Row="1" IsOpen="False" IsClosable="True" />
-
-        <Grid Grid.Row="2">
-            <ListView x:Name="EntryList" SelectionMode="None">
-                <ListView.ItemTemplate>
-                    <DataTemplate x:DataType="local:EntryRow">
-                        <Grid ColumnSpacing="12" Padding="0,4">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*" />
-                                <ColumnDefinition Width="Auto" />
-                                <ColumnDefinition Width="Auto" />
-                            </Grid.ColumnDefinitions>
-                            <TextBlock Grid.Column="0" Text="{x:Bind Name}" TextTrimming="CharacterEllipsis" />
-                            <TextBlock Grid.Column="1" Text="{x:Bind Note}" Opacity="0.7" />
-                            <TextBlock Grid.Column="2" Text="{x:Bind SizeText}" Opacity="0.7" MinWidth="80"
-                                       HorizontalTextAlignment="Right" />
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
-            </ListView>
-
-            <TextBlock x:Name="EmptyText" Text="Drop an archive here, or press Open archive."
-                       HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0.6" />
+        <!-- Title bar (drawn by Arca so it follows the light/dark setting) -->
+        <Grid x:Name="AppTitleBar" Grid.Row="0" Padding="14,0,0,0" ColumnSpacing="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Image Source="ms-appx:///Assets/Arca.png" Width="16" Height="16" VerticalAlignment="Center" />
+            <TextBlock x:Name="TitleText" Grid.Column="1" Text="Arca" FontSize="12" VerticalAlignment="Center" />
         </Grid>
 
-        <StackPanel Grid.Row="3" Spacing="6">
-            <ProgressBar x:Name="BusyBar" Visibility="Collapsed" IsIndeterminate="True" />
-            <TextBlock x:Name="StatusText" Opacity="0.7" TextTrimming="CharacterEllipsis" />
+        <!-- Menus -->
+        <MenuBar Grid.Row="1" Margin="4,0,0,0">
+            <MenuBarItem Title="File">
+                <MenuFlyoutItem Text="Open archive…" Click="Open_Click">
+                    <MenuFlyoutItem.Icon><FontIcon Glyph="&#xED25;" /></MenuFlyoutItem.Icon>
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="O" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="New archive from files…" Click="AddFiles_Click" />
+                <MenuFlyoutItem Text="New archive from a folder…" Click="AddFolder_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Close archive" Click="CloseArchive_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Exit" Click="Exit_Click" />
+            </MenuBarItem>
+            <MenuBarItem Title="Commands">
+                <MenuFlyoutItem Text="Extract to…" Click="Extract_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="E" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Test archive" Click="Test_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="T" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="View file" Click="View_Click" />
+                <MenuFlyoutItem Text="Find…" Click="Find_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="F" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Archive info" Click="Info_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="I" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem Text="Scan with Microsoft Defender" Click="Scan_Click" />
+            </MenuBarItem>
+            <MenuBarItem Title="Options">
+                <MenuFlyoutSubItem Text="Theme">
+                    <RadioMenuFlyoutItem x:Name="ThemeSystemItem" Text="Use Windows setting" GroupName="Theme" Tag="System" Click="ThemeItem_Click" />
+                    <RadioMenuFlyoutItem x:Name="ThemeLightItem" Text="Light" GroupName="Theme" Tag="Light" Click="ThemeItem_Click" />
+                    <RadioMenuFlyoutItem x:Name="ThemeDarkItem" Text="Dark" GroupName="Theme" Tag="Dark" Click="ThemeItem_Click" />
+                </MenuFlyoutSubItem>
+                <MenuFlyoutSeparator />
+                <ToggleMenuFlyoutItem x:Name="SmartFolderItem" Text="Extract all: new folder when needed" Click="Option_Click" />
+                <ToggleMenuFlyoutItem x:Name="KeepMarkItem" Text="Keep the &quot;downloaded from the internet&quot; mark" Click="Option_Click" />
+            </MenuBarItem>
+            <MenuBarItem Title="Help">
+                <MenuFlyoutItem Text="About Arca" Click="About_Click" />
+            </MenuBarItem>
+        </MenuBar>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="2" Margin="8,2,8,6" Padding="4" CornerRadius="6"
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Hidden" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal" Spacing="2">
+                        <Button Style="{StaticResource ToolButtonStyle}" Click="Open_Click" ToolTipService.ToolTip="Open an archive (Ctrl+O)">
+                            <StackPanel><FontIcon Glyph="&#xED25;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Open" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Button x:Name="AddButton" Style="{StaticResource ToolButtonStyle}" ToolTipService.ToolTip="Make a new archive from files or a folder (you can also drop them on this window)">
+                            <Button.Flyout>
+                                <MenuFlyout Placement="Bottom">
+                                    <MenuFlyoutItem Text="Files…" Click="AddFiles_Click">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8A5;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                    <MenuFlyoutItem Text="A folder…" Click="AddFolder_Click">
+                                        <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
+                                    </MenuFlyoutItem>
+                                </MenuFlyout>
+                            </Button.Flyout>
+                            <StackPanel><FontIcon Glyph="&#xE710;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Add" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Button x:Name="ExtractButton" Style="{StaticResource ToolButtonStyle}" Click="Extract_Click" ToolTipService.ToolTip="Extract the selected files, or everything if nothing is selected (Ctrl+E)">
+                            <StackPanel><FontIcon Glyph="&#xE896;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Extract To" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Button x:Name="TestButton" Style="{StaticResource ToolButtonStyle}" Click="Test_Click" ToolTipService.ToolTip="Read every file and check it isn't damaged (Ctrl+T)">
+                            <StackPanel><FontIcon Glyph="&#xE9D5;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Test" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Button x:Name="ViewButton" Style="{StaticResource ToolButtonStyle}" Click="View_Click" ToolTipService.ToolTip="Open the selected file in its usual app without extracting the rest">
+                            <StackPanel><FontIcon Glyph="&#xE890;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="View" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Button x:Name="FindButton" Style="{StaticResource ToolButtonStyle}" Click="Find_Click" ToolTipService.ToolTip="Find files anywhere in the archive (Ctrl+F)">
+                            <StackPanel><FontIcon Glyph="&#xE721;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Find" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Button x:Name="InfoButton" Style="{StaticResource ToolButtonStyle}" Click="Info_Click" ToolTipService.ToolTip="Archive details and safety checks (Ctrl+I)">
+                            <StackPanel><FontIcon Glyph="&#xE946;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Info" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                        <Border Width="1" Margin="6,10" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+                        <Button x:Name="ScanButton" Style="{StaticResource ToolButtonStyle}" Click="Scan_Click" ToolTipService.ToolTip="Scan this archive with Microsoft Defender">
+                            <StackPanel><FontIcon Glyph="&#xEA18;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Scan" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
+                        </Button>
+                    </StackPanel>
+                </ScrollViewer>
+                <Button x:Name="ThemeButton" Grid.Column="1" Style="{StaticResource ToolButtonStyle}" Click="ThemeButton_Click">
+                    <StackPanel>
+                        <FontIcon x:Name="ThemeIcon" Glyph="&#xE708;" Style="{StaticResource ToolIconStyle}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock x:Name="ThemeLabel" Text="Dark" Style="{StaticResource ToolLabelStyle}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- Path bar -->
+        <Grid Grid.Row="3" Margin="8,0,8,6" ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <Button x:Name="UpButton" Click="Up_Click" Width="40" Height="36" Padding="0" Background="Transparent" BorderThickness="0"
+                    ToolTipService.ToolTip="Up one level (Backspace)" AutomationProperties.Name="Up one level">
+                <FontIcon Glyph="&#xE74A;" FontSize="14" />
+            </Button>
+            <Border Grid.Column="1" MinHeight="36" Padding="10,0" CornerRadius="4"
+                    Background="{ThemeResource ControlFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Image x:Name="PathIcon" Width="16" Height="16" />
+                    <TextBlock x:Name="PathText" Text="No archive open" TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+            </Border>
+            <TextBox x:Name="FindBox" Grid.Column="2" Width="240" MinHeight="36" PlaceholderText="Find in archive"
+                     TextChanged="FindBox_TextChanged" KeyDown="FindBox_KeyDown" AutomationProperties.Name="Find in archive" />
+        </Grid>
+
+        <!-- Messages and progress -->
+        <StackPanel Grid.Row="4" Margin="8,0,8,0">
+            <InfoBar x:Name="Bar" IsOpen="False" IsClosable="True" Margin="0,0,0,6" />
+            <Grid x:Name="BusyPanel" Visibility="Collapsed" ColumnSpacing="12" Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="4" VerticalAlignment="Center">
+                    <TextBlock x:Name="BusyText" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <ProgressBar IsIndeterminate="True" />
+                </StackPanel>
+                <Button Grid.Column="1" Content="Cancel" Click="Cancel_Click" />
+            </Grid>
         </StackPanel>
+
+        <!-- File list -->
+        <Border Grid.Row="5" Margin="8,0,8,0" CornerRadius="6,6,0,0"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,1,1,0">
+            <Grid>
+                <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                    <Grid MinWidth="900">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <Grid Padding="14,4,14,4" ColumnSpacing="8" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" MinWidth="220" />
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="180" />
+                                <ColumnDefinition Width="150" />
+                                <ColumnDefinition Width="90" />
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="NameHeader" Grid.Column="0" Style="{StaticResource HeaderButtonStyle}" Tag="Name" Click="Header_Click" Content="Name" />
+                            <Button x:Name="SizeHeader" Grid.Column="1" Style="{StaticResource HeaderButtonStyle}" Tag="Size" Click="Header_Click" Content="Size" HorizontalContentAlignment="Right" />
+                            <Button x:Name="PackedHeader" Grid.Column="2" Style="{StaticResource HeaderButtonStyle}" Tag="Packed" Click="Header_Click" Content="Packed" HorizontalContentAlignment="Right" />
+                            <Button x:Name="TypeHeader" Grid.Column="3" Style="{StaticResource HeaderButtonStyle}" Tag="Type" Click="Header_Click" Content="Type" />
+                            <Button x:Name="ModifiedHeader" Grid.Column="4" Style="{StaticResource HeaderButtonStyle}" Tag="Modified" Click="Header_Click" Content="Modified" />
+                            <Button x:Name="CrcHeader" Grid.Column="5" Style="{StaticResource HeaderButtonStyle}" Tag="Crc" Click="Header_Click" Content="CRC32" />
+                        </Grid>
+
+                        <ListView x:Name="EntryList" Grid.Row="1" SelectionMode="Extended" IsDoubleTapEnabled="True"
+                                  DoubleTapped="EntryList_DoubleTapped" SelectionChanged="EntryList_SelectionChanged"
+                                  KeyDown="EntryList_KeyDown" AutomationProperties.Name="Files in the archive">
+                            <ListView.ItemContainerStyle>
+                                <Style TargetType="ListViewItem" BasedOn="{StaticResource DefaultListViewItemStyle}">
+                                    <Setter Property="Padding" Value="10,0,10,0" />
+                                    <Setter Property="MinHeight" Value="34" />
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                                </Style>
+                            </ListView.ItemContainerStyle>
+                            <ListView.ItemTemplate>
+                                <DataTemplate x:DataType="local:EntryRow">
+                                    <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind ToolTip}">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" MinWidth="220" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="110" />
+                                            <ColumnDefinition Width="180" />
+                                            <ColumnDefinition Width="150" />
+                                            <ColumnDefinition Width="90" />
+                                        </Grid.ColumnDefinitions>
+                                        <Grid ColumnSpacing="10" Padding="4,0,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Image Source="{x:Bind Icon}" Width="20" Height="20" VerticalAlignment="Center" />
+                                            <TextBlock Grid.Column="1" Text="{x:Bind Name}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                                            <FontIcon Grid.Column="2" Glyph="&#xE72E;" FontSize="12" Visibility="{x:Bind LockVisibility}"
+                                                      Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" AutomationProperties.Name="Password-protected" />
+                                            <FontIcon Grid.Column="3" Glyph="&#xE7BA;" FontSize="12" Visibility="{x:Bind WarnVisibility}"
+                                                      Foreground="{ThemeResource SystemFillColorCriticalBrush}" AutomationProperties.Name="Unsafe name" />
+                                        </Grid>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind SizeText}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                                        <TextBlock Grid.Column="2" Text="{x:Bind PackedText}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="3" Text="{x:Bind TypeText}" VerticalAlignment="Center" Margin="4,0,0,0" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="4" Text="{x:Bind ModifiedText}" VerticalAlignment="Center" Margin="4,0,0,0"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Grid.Column="5" Text="{x:Bind CrcText}" VerticalAlignment="Center" Margin="4,0,0,0"
+                                                   FontFamily="Cascadia Mono, Consolas" FontSize="12.5"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </ScrollViewer>
+
+                <StackPanel x:Name="EmptyPanel" Spacing="10" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <FontIcon Glyph="&#xE8B7;" FontSize="40" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
+                    <TextBlock Text="Drop an archive here to open it, or files and folders to pack them." HorizontalAlignment="Center"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock Text="Opens ZIP, 7z, RAR, RAR5, TAR, GZ, BZ2 and XZ · creates ZIP, TAR, TAR.GZ and TAR.BZ2" HorizontalAlignment="Center" FontSize="12"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Status bar -->
+        <Grid Grid.Row="6" Margin="8,0,8,8" Padding="14,6" ColumnSpacing="16" CornerRadius="0,0,6,6"
+              Background="{ThemeResource LayerFillColorDefaultBrush}"
+              BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <TextBlock x:Name="SelectionText" FontSize="12" TextTrimming="CharacterEllipsis" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <TextBlock x:Name="TotalText" Grid.Column="1" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+        </Grid>
     </Grid>
 </Window>
