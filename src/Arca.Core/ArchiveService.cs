@@ -24,7 +24,7 @@ public static class ArchiveService
         bool tooMany = false;
 
         // Entries are only looked at here, never opened; for a .tar.gz the reader steps over each file's data.
-        var isSolid = Walk(archivePath, format, new ReaderOptions { Password = password }, (e, _) =>
+        var isSolid = Walk(archivePath, format, new ReaderOptions { Password = password }, (e, open) =>
         {
             if (entries.Count >= limits.MaxEntries) { tooMany = true; return false; }
             var name = EntryName(e, archivePath);
