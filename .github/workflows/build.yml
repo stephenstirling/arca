@@ -21,6 +21,14 @@ jobs:
       - name: Publish (self-contained, win-x64)
         run: dotnet publish src/Arca -c Release -r win-x64 --self-contained true -o "${{ runner.temp }}/arca-build"
 
+      # Unsigned, for trying a pull request on a PC before it is merged. Kept 7 days.
+      - name: Keep the build (unsigned)
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: Arca-unsigned-${{ github.run_number }}-win-x64
+          path: ${{ runner.temp }}/arca-build
+          retention-days: 7
+
       # The core library (formats, path safety, zip-bomb limits) is plain .NET, so its tests run here too.
       - name: Test
         run: dotnet test tests/Arca.Core.Tests -c Release
