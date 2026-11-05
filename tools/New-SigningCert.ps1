@@ -33,11 +33,11 @@ $bytes = New-Object byte[] 28
 $password = -join ($bytes | ForEach-Object { $chars[$_ % $chars.Length] })
 $secure = ConvertTo-SecureString $password -AsPlainText -Force
 
-# Made in the current user's store only to get an exarcable key; removed again below.
+# Made in the current user's store only to get an exportable key; removed again below.
 $cert = New-SelfSignedCertificate -Type CodeSigningCert `
     -Subject 'CN=Arca, O=Stephen Stirling' `
     -KeyAlgorithm RSA -KeyLength 3072 -HashAlgorithm SHA256 `
-    -KeyExportPolicy Exarcable -KeyUsage DigitalSignature `
+    -KeyExportPolicy Exportable -KeyUsage DigitalSignature `
     -NotAfter (Get-Date).AddYears(10) `
     -CertStoreLocation Cert:\CurrentUser\My
 try {
