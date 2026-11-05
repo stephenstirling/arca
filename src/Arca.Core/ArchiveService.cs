@@ -19,18 +19,19 @@ public static class ArchiveService
         var format = RequireReadable(archivePath);
         var archiveLength = new FileInfo(archivePath).Length;
 
-        using var archive = ArchiveFactory.Open(archivePath, new ReaderOptions { Password = password });
         var entries = new List<ArchiveEntryInfo>();
         var warnings = new List<ArchiveWarning>();
         bool tooMany = false;
 
-        foreach (var e in archive.Entries)
+        // Entries are only looked at here, never opened; for a .tar.gz the reader steps over each file's data.
+        var isSolid = Walk(archivePath, format, new ReaderOptions { Password = password }, (e, _) =>
         {
-            if (entries.Count >= limits.MaxEntries) { tooMany = true; break; }
+            if (entries.Count >= limits.MaxEntries) { tooMany = true; return false; }
             var name = EntryName(e, archivePath);
             var unsafeReason = EntryPathGuard.CheckName(name, out _);
             entries.Add(new ArchiveEntryInfo(name, e.IsDirectory, e.Size, e.CompressedSize, e.IsEncrypted, e.LastModifiedTime, unsafeReason, e.Crc));
-        }
+            return true;
+        });
 
         if (tooMany)
             warnings.Add(new ArchiveWarning("too-many-entries", $"This archive holds more than {limits.MaxEntries:N0} entries. Only the first {limits.MaxEntries:N0} are shown, and extracting it will stop at that limit."));
@@ -56,7 +57,7 @@ public static class ArchiveService
             Format = format,
             Entries = entries,
             Warnings = warnings,
-            IsSolid = archive.IsSolid,
+            IsSolid = isSolid,
             ArchiveSize = archiveLength,
         };
     }
@@ -78,7 +79,7 @@ public static class ArchiveService
     {
         options ??= new ExtractOptions();
         var limits = options.Limits;
-        RequireReadable(archivePath);
+        var format = RequireReadable(archivePath);
 
         var archiveLength = new FileInfo(archivePath).Length;
         var mark = options.PropagateMarkOfTheWeb ? MarkOfTheWeb.Read(archivePath) : null;
@@ -87,7 +88,7 @@ public static class ArchiveService
         var strip = ArchivePaths.Normalize(options.StripPrefix);
 
         var root = Path.GetFullPath(destinationFolder);
-        if (only is null && options.SmartFolder && NeedsWrapperFolder(archivePath, readerOptions))
+        if (only is null && options.SmartFolder && NeedsWrapperFolder(archivePath, format, readerOptions))
             root = UniquePath(Path.Combine(root, WrapperFolderName(archivePath)));
         Directory.CreateDirectory(root);
 
@@ -201,8 +202,7 @@ public static class ArchiveService
             return true;
         }
 
-        using var archive = ArchiveFactory.Open(archivePath, readerOptions);
-        Walk(archive, Handle);
+        Walk(archivePath, format, readerOptions, Handle);
         return result;
     }
 
@@ -220,7 +220,7 @@ public static class ArchiveService
         SafetyLimits? limits = null)
     {
         limits ??= SafetyLimits.Default;
-        RequireReadable(archivePath);
+        var format = RequireReadable(archivePath);
 
         var meter = new Meter(limits, new FileInfo(archivePath).Length);
         var result = new TestResult();
@@ -281,12 +281,33 @@ public static class ArchiveService
             return true;
         }
 
-        using var archive = ArchiveFactory.Open(archivePath, new ReaderOptions { Password = password });
-        Walk(archive, Handle);
+        Walk(archivePath, format, new ReaderOptions { Password = password }, Handle);
         return result;
     }
 
-    /// <summary>Calls <paramref name="handle"/> for each entry in archive order until it returns false.</summary>
+    /// <summary>
+    /// Calls <paramref name="handle"/> for each entry in archive order until it returns false. Returns whether the
+    /// archive is solid. GZip, BZip2 and XZ are read as a stream, which is also what finds the TAR inside a .tar.gz
+    /// (opened as an archive, it would look like one big .tar file).
+    /// </summary>
+    private static bool Walk(string archivePath, ArchiveFormat format, ReaderOptions readerOptions, Func<IEntry, Func<Stream>, bool> handle)
+    {
+        if (format is ArchiveFormat.Gzip or ArchiveFormat.Bzip2 or ArchiveFormat.Xz)
+        {
+            using var stream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var streamReader = ReaderFactory.Open(stream, readerOptions);
+            while (streamReader.MoveToNextEntry())
+            {
+                if (!handle(streamReader.Entry, () => streamReader.OpenEntryStream())) break;
+            }
+            return false;
+        }
+
+        using var archive = ArchiveFactory.Open(archivePath, readerOptions);
+        Walk(archive, handle);
+        return archive.IsSolid;
+    }
+
     private static void Walk(IArchive archive, Func<IEntry, Func<Stream>, bool> handle)
     {
         if (archive.IsSolid || archive.Type == ArchiveType.Rar)
@@ -352,20 +373,19 @@ public static class ArchiveService
         return string.IsNullOrEmpty(key) ? Path.GetFileNameWithoutExtension(archivePath) : key;
     }
 
-    private static bool NeedsWrapperFolder(string archivePath, ReaderOptions readerOptions)
+    private static bool NeedsWrapperFolder(string archivePath, ArchiveFormat format, ReaderOptions readerOptions)
     {
-        using var archive = ArchiveFactory.Open(archivePath, readerOptions);
         var topLevel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in archive.Entries)
+        Walk(archivePath, format, readerOptions, (entry, _) =>
         {
             var key = entry.Key;
-            if (string.IsNullOrEmpty(key)) continue;
+            if (string.IsNullOrEmpty(key)) return true;
             var first = key.Split(new[] { '/', '\\' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
-            if (first is null || first == ".") continue;
+            if (first is null || first == ".") return true;
             topLevel.Add(first);
-            if (topLevel.Count > 1) return true;
-        }
-        return false;
+            return topLevel.Count <= 1;   // two different top-level names is enough to know
+        });
+        return topLevel.Count > 1;
     }
 
     private static string WrapperFolderName(string archivePath)
