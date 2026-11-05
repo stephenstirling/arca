@@ -1,7 +1,9 @@
 name: Build
 
-# Build only: catches a broken build before merging. No signing, no release, no secrets.
+# Build and test: catches a broken build before merging, and checks main after. No signing, no release, no secrets.
 on:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
