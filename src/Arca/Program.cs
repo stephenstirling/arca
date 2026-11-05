@@ -18,14 +18,23 @@ public static class Program
     {
         if (Cli.TryRun(args) is int exitCode) return exitCode;
 
-        WinRT.ComWrappersSupport.InitializeComWrappers();
-        XamlCheckProcessRequirements();
-        Application.Start(p =>
+        try
         {
-            var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
-            SynchronizationContext.SetSynchronizationContext(context);
-            _ = new App();
-        });
-        return 0;
+            WinRT.ComWrappersSupport.InitializeComWrappers();
+            XamlCheckProcessRequirements();
+            Application.Start(p =>
+            {
+                var context = new DispatcherQueueSynchronizationContext(DispatcherQueue.GetForCurrentThread());
+                SynchronizationContext.SetSynchronizationContext(context);
+                _ = new App();
+            });
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            // e.g. a missing Windows App SDK file: say so rather than closing without a word.
+            CrashReport.Show("startup", ex);
+            return 1;
+        }
     }
 }
