@@ -304,6 +304,191 @@ public sealed partial class MainWindow : Window
         if (file is not null) await LoadAsync(file.Path);
     }
 
+    // ---------- Creating archives ----------
+
+    private async void AddFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var picker = new FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add("*");
+        var files = await picker.PickMultipleFilesAsync();
+        if (files is { Count: > 0 }) await CreateArchiveAsync(files.Select(f => f.Path).ToList());
+    }
+
+    private async void AddFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy) return;
+        var folder = await PickFolderAsync();
+        if (folder is not null) await CreateArchiveAsync(new List<string> { folder });
+    }
+
+    private static readonly CreateFormat[] CreateFormats = { CreateFormat.Zip, CreateFormat.TarGz, CreateFormat.TarBz2, CreateFormat.Tar };
+    private static readonly PackLevel[] PackLevels = { PackLevel.Normal, PackLevel.Maximum, PackLevel.Fast, PackLevel.Store };
+
+    /// <summary>Asks for a name, format and place, makes the archive, then opens it.</summary>
+    private async Task CreateArchiveAsync(IReadOnlyList<string> sources)
+    {
+        if (_busy || sources.Count == 0) return;
+
+        var first = Path.TrimEndingDirectorySeparator(sources[0]);
+        var saveIn = Path.GetDirectoryName(first);
+        if (string.IsNullOrEmpty(saveIn)) saveIn = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+
+        var summary = new TextBlock
+        {
+            TextWrapping = TextWrapping.Wrap,
+            Opacity = 0.75,
+            Text = sources.Count == 1
+                ? "Packing " + Path.GetFileName(first)
+                : $"Packing {sources.Count:N0} items: " + string.Join(", ", sources.Take(3).Select(p => Path.GetFileName(Path.TrimEndingDirectorySeparator(p)))) + (sources.Count > 3 ? ", …" : ""),
+        };
+        var nameBox = new TextBox { Header = "Archive name", Text = ArchiveWriter.SuggestName(sources, CreateFormat.Zip) };
+        var formatBox = new ComboBox { Header = "Format", ItemsSource = CreateFormats.Select(ArchiveWriter.DisplayName).ToList(), SelectedIndex = 0, MinWidth = 170 };
+        var levelBox = new ComboBox
+        {
+            Header = "Compression",
+            ItemsSource = new List<string> { "Normal", "Maximum (slower)", "Fast", "None (store only)" },
+            SelectedIndex = 0,
+            MinWidth = 170,
+        };
+        var whereText = new TextBlock { Text = saveIn, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+        var changeButton = new Button { Content = "Change…" };
+        var problem = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false, IsOpen = false };
+
+        formatBox.SelectionChanged += (_, _) =>
+        {
+            var format = CreateFormats[Math.Max(0, formatBox.SelectedIndex)];
+            nameBox.Text = StripArchiveExtension(nameBox.Text.Trim()) + ArchiveWriter.Extension(format);
+            levelBox.IsEnabled = format != CreateFormat.Tar;   // plain TAR isn't compressed
+        };
+        changeButton.Click += async (_, _) =>
+        {
+            var picked = await PickFolderAsync();
+            if (picked is null) return;
+            saveIn = picked;
+            whereText.Text = picked;
+        };
+
+        var whereRow = new Grid { ColumnSpacing = 8 };
+        whereRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        whereRow.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(changeButton, 1);
+        whereRow.Children.Add(whereText);
+        whereRow.Children.Add(changeButton);
+
+        var options = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        options.Children.Add(formatBox);
+        options.Children.Add(levelBox);
+
+        var panel = new StackPanel { Spacing = 14, MinWidth = 420 };
+        panel.Children.Add(summary);
+        panel.Children.Add(nameBox);
+        panel.Children.Add(options);
+        panel.Children.Add(new TextBlock { Text = "Save in", Margin = new Thickness(0, 0, 0, -8) });
+        panel.Children.Add(whereRow);
+        panel.Children.Add(problem);
+
+        string target = "";
+        var dialog = new ContentDialog
+        {
+            Title = "New archive",
+            Content = panel,
+            PrimaryButtonText = "Create",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Root.XamlRoot,
+            RequestedTheme = Root.ActualTheme,
+        };
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            var format = CreateFormats[Math.Max(0, formatBox.SelectedIndex)];
+            var name = nameBox.Text.Trim();
+            if (name.Length == 0 || name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            {
+                problem.Message = "Give the archive a name without \\ / : * ? \" < > or |.";
+                problem.IsOpen = true;
+                args.Cancel = true;
+                return;
+            }
+            if (!name.EndsWith(ArchiveWriter.Extension(format), StringComparison.OrdinalIgnoreCase))
+                name = StripArchiveExtension(name) + ArchiveWriter.Extension(format);
+            var candidate = Path.Combine(saveIn, name);
+            if (File.Exists(candidate) || Directory.Exists(candidate))
+            {
+                problem.Message = $"{name} already exists there. Choose another name or place.";
+                problem.IsOpen = true;
+                args.Cancel = true;
+                return;
+            }
+            target = candidate;
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || target.Length == 0) return;
+
+        var createOptions = new CreateOptions
+        {
+            Format = CreateFormats[Math.Max(0, formatBox.SelectedIndex)],
+            Level = PackLevels[Math.Max(0, levelBox.SelectedIndex)],
+        };
+        var archiveName = Path.GetFileName(target);
+
+        HideMessage();
+        SetBusy("Creating " + archiveName + "…");
+        var token = NewToken();
+        var progress = new Progress<ExtractProgress>(p =>
+            BusyText.Text = $"Packing: {p.FilesExtracted:N0} files, {ArchiveService.FormatBytes(p.BytesWritten)}   {p.CurrentEntry}");
+        CreateResult result;
+        try
+        {
+            result = await Task.Run(() => ArchiveWriter.Create(target, sources, createOptions, progress, token), token);
+        }
+        catch (OperationCanceledException)
+        {
+            ShowMessage(InfoBarSeverity.Informational, "Cancelled", "No archive was made.");
+            return;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ShowMessage(InfoBarSeverity.Error, "Couldn't create " + archiveName, ex.Message);
+            return;
+        }
+        finally
+        {
+            SetBusy(null);
+        }
+
+        await LoadAsync(result.ArchivePath);
+
+        long size = 0;
+        try { size = new FileInfo(result.ArchivePath).Length; } catch (IOException) { }
+        var message = $"{result.FilesAdded:N0} {Plural(result.FilesAdded, "file")} ({ArchiveService.FormatBytes(result.BytesAdded)}) packed into {ArchiveService.FormatBytes(size)}.";
+        if (result.Skipped.Count > 0)
+        {
+            var examples = string.Join("\n", result.Skipped.Take(5).Select(s => $"• {s.Path}: {s.Reason}"));
+            var more = result.Skipped.Count > 5 ? $"\n…and {result.Skipped.Count - 5:N0} more." : "";
+            ShowMessage(InfoBarSeverity.Warning, $"Created {archiveName}, but {result.Skipped.Count:N0} {Plural(result.Skipped.Count, "item")} left out",
+                message + "\n" + examples + more);
+        }
+        else
+        {
+            ShowMessage(InfoBarSeverity.Success, "Created " + archiveName, message);
+        }
+    }
+
+    private static string StripArchiveExtension(string name)
+    {
+        foreach (var ext in new[] { ".tar.gz", ".tar.bz2", ".tgz", ".tar", ".zip" })
+            if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return name[..^ext.Length];
+        return name;
+    }
+
+    private static bool IsReadableArchive(string path)
+    {
+        try { return ArchiveFormats.CanRead(FormatDetector.DetectFile(path)); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+    }
+
     private void CloseArchive_Click(object sender, RoutedEventArgs e)
     {
         if (_busy) return;
@@ -782,6 +967,7 @@ public sealed partial class MainWindow : Window
 
     private void UpdateCommands()
     {
+        SetEnabled(AddButton, !_busy);
         bool ready = _listing is not null && !_busy;
         foreach (var control in new Control[] { ExtractButton, TestButton, ViewButton, FindButton, InfoButton, ScanButton })
             SetEnabled(control, ready);
@@ -825,14 +1011,20 @@ public sealed partial class MainWindow : Window
     private void Root_DragOver(object sender, DragEventArgs e)
     {
         e.AcceptedOperation = DataPackageOperation.Copy;
-        e.DragUIOverride.Caption = "Open archive";
+        e.DragUIOverride.Caption = "Open, or pack into a new archive";
     }
 
     private async void Root_Drop(object sender, DragEventArgs e)
     {
         if (!e.DataView.Contains(StandardDataFormats.StorageItems)) return;
         var items = await e.DataView.GetStorageItemsAsync();
-        var file = items.OfType<StorageFile>().FirstOrDefault();
-        if (file is not null) await LoadAsync(file.Path);
+        var paths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
+        if (paths.Count == 0) return;
+
+        // One archive: open it. Anything else (files, folders, several archives): offer to pack it.
+        if (paths.Count == 1 && File.Exists(paths[0]) && IsReadableArchive(paths[0]))
+            await LoadAsync(paths[0]);
+        else
+            await CreateArchiveAsync(paths);
     }
 }
