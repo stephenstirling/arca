@@ -41,6 +41,15 @@ public sealed record ExtractOptions
     public bool PropagateMarkOfTheWeb { get; init; } = true;
 
     public string? Password { get; init; }
+
+    /// <summary>
+    /// Extract only these entries (paths as in <see cref="ArchiveNode.FullPath"/>; a folder includes everything under it).
+    /// Null extracts everything. When set, <see cref="SmartFolder"/> is ignored.
+    /// </summary>
+    public IReadOnlyCollection<string>? Only { get; init; }
+
+    /// <summary>A folder inside the archive whose path is removed from the front of each name ("photos" makes "photos/a.jpg" land as "a.jpg").</summary>
+    public string? StripPrefix { get; init; }
 }
 
 public sealed record ArchiveEntryInfo(
@@ -50,7 +59,8 @@ public sealed record ArchiveEntryInfo(
     long CompressedSize,
     bool IsEncrypted,
     DateTime? LastModified,
-    string? UnsafeReason);
+    string? UnsafeReason,
+    long Crc = 0);
 
 public sealed record ArchiveWarning(string Kind, string Message);
 
@@ -61,7 +71,13 @@ public sealed class ArchiveListing
     public required IReadOnlyList<ArchiveEntryInfo> Entries { get; init; }
     public required IReadOnlyList<ArchiveWarning> Warnings { get; init; }
 
-    public long TotalSize => Entries.Where(e => !e.IsDirectory).Sum(e => e.Size);
+    /// <summary>A solid archive compresses files together, so one damaged spot affects everything after it.</summary>
+    public bool IsSolid { get; init; }
+
+    public long ArchiveSize { get; init; }
+
+    public long TotalSize => Entries.Where(e => !e.IsDirectory).Sum(e => Math.Max(0, e.Size));
+    public long TotalPacked => Entries.Where(e => !e.IsDirectory).Sum(e => Math.Max(0, e.CompressedSize));
     public int FileCount => Entries.Count(e => !e.IsDirectory);
 }
 
@@ -81,4 +97,16 @@ public sealed class ExtractResult
     public string? AbortReason { get; set; }
 
     public bool Completed => AbortReason is null;
+}
+
+/// <summary>What "Test" found: every file is read through and its checksum compared with the one stored in the archive.</summary>
+public sealed class TestResult
+{
+    public int FilesOk { get; set; }
+    public long BytesRead { get; set; }
+    public List<SkippedEntry> Failed { get; } = new();
+    public List<SkippedEntry> Skipped { get; } = new();
+    public string? AbortReason { get; set; }
+
+    public bool AllGood => AbortReason is null && Failed.Count == 0;
 }

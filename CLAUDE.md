@@ -18,9 +18,11 @@ src\Arca\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\Arca.exe  [archive fil
 
 - `src/Arca.Core/` - plain .NET library, no UI. `ArchiveFormat.cs` (format detection by content),
   `EntryPathGuard.cs` (refuses `../`, absolute paths, device names, streams, links),
-  `ArchiveService.cs` (list and extract, with size and zip-bomb limits), `MarkOfTheWeb.cs`, `Models.cs`
+  `ArchiveService.cs` (list, extract, test, with size and zip-bomb limits), `ArchiveTree.cs` (folders from the
+  flat list of names), `Crc32.cs`, `MarkOfTheWeb.cs`, `Models.cs`
 - `src/Arca/` - the WinUI 3 app. `Program.cs` entry point, `Cli.cs` (the switches Integra uses),
-  `MainWindow.xaml(.cs)` list, drag and drop, extract
+  `MainWindow.xaml(.cs)` the WinRAR-style window (menu, toolbar, path bar, file list, status bar, light/dark),
+  `EntryRow.cs` one list row, `ShellInfo.cs` Windows' own file-type names and icons, `SettingsStore.cs`
 - `tests/Arca.Core.Tests/` - xUnit tests for the core (run on any OS)
 - `integra-app.json` - tells Integra how to install, update and stop Arca (same contract as Porta's)
 - `tools/` - release scripts, copied from Porta (`Build-Release.ps1`, `New-IntegraManifest.ps1`,
