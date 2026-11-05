@@ -21,6 +21,32 @@ jobs:
       - name: Publish (self-contained, win-x64)
         run: dotnet publish src/Arca -c Release -r win-x64 --self-contained true -o "${{ runner.temp }}/arca-build"
 
+      # Starts the real app and checks it stays open, so a crash on start shows up here, with its reason.
+      - name: Startup check
+        shell: pwsh
+        env:
+          ARCA_NO_CRASH_DIALOG: '1'
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'arca-build/Arca.exe'
+          $version = (& $exe --version | Out-String).Trim()
+          Write-Host "Arca.exe --version: '$version' (exit code $LASTEXITCODE)"
+
+          $log = Join-Path $env:LOCALAPPDATA 'Arca/crash.log'
+          Remove-Item $log -ErrorAction SilentlyContinue
+          $start = (Get-Date).AddSeconds(-2)
+          $p = Start-Process $exe -PassThru
+          Start-Sleep -Seconds 20
+          $alive = -not $p.HasExited
+          if ($alive) { Stop-Process -Id $p.Id -Force } else { Write-Host "Arca exited by itself with code $($p.ExitCode)" }
+          Write-Host "Still running after 20 seconds: $alive"
+
+          if (Test-Path $log) { Write-Host '----- crash.log -----'; Get-Content $log | Write-Host }
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $start } -ErrorAction SilentlyContinue |
+            Where-Object { $_.ProviderName -in '.NET Runtime', 'Application Error', 'Windows Error Reporting', 'SideBySide' } |
+            ForEach-Object { Write-Host "----- $($_.ProviderName) -----"; Write-Host $_.Message }
+
+          if (-not $alive -or (Test-Path $log)) { throw 'Arca did not start cleanly; the reason is printed above.' }
+
       # Unsigned, for trying a pull request on a PC before it is merged. Kept 7 days.
       - name: Keep the build (unsigned)
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2

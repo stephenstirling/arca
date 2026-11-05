@@ -28,7 +28,9 @@ internal static class CrashReport
         }
         catch (Exception logError) when (logError is IOException or UnauthorizedAccessException) { }
 
-        // One box per run is enough; later errors are still logged.
+        // One box per run is enough; later errors are still logged. The build's startup check sets
+        // ARCA_NO_CRASH_DIALOG so a box can't sit there waiting for a click nobody will make.
+        if (Environment.GetEnvironmentVariable("ARCA_NO_CRASH_DIALOG") == "1") return;
         if (Interlocked.Exchange(ref _shown, 1) == 1) return;
         var summary = ex is null ? "Unknown error" : $"{ex.GetType().Name}: {ex.Message}";
         MessageBoxW(IntPtr.Zero,
