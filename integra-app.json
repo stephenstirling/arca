@@ -6,7 +6,7 @@
   "repo": "stephenstirling/arca",
   "assetPattern": "Arca-*-win-x64.zip",
   "checksumAsset": "SHA256SUMS.txt",
-  "signerThumbprint": "0000000000000000000000000000000000000000",
+  "signerThumbprint": "1F9679C588ECBC69AAD04C296DF662759C6ADC48",
   "exe": "Arca.exe",
   "minWindows": "10.0.22000",
   "arch": "x64",
