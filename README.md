@@ -16,7 +16,8 @@ that [Integra](https://github.com/stephenstirling/integra) installs and updates.
 |---|---|
 | ZIP, 7z, RAR, RAR5, TAR (+ gz, bz2, xz) | Read and extract |
 | Zstandard, Brotli, LZ4, ZPAQ, ISO, WIM, CAB, VHD, DMG, SquashFS, CPIO, RPM, DEB, MSI, CBZ/CBR/CB7 | Planned (ISO, CAB and Zstandard are already recognised and reported as "not supported yet") |
-| Creating ZIP, 7z, TAR, Zstandard | Planned |
+| Creating ZIP, TAR, TAR.GZ, TAR.BZ2 | Yes (Add button, or drop files on the window) |
+| Creating 7z, Zstandard | Planned |
 | Creating RAR | Not possible without a RARLAB licence. Planned: use the user's own `rar.exe` if WinRAR is installed |
 
 RAR is read with SharpCompress's own reader, so no RARLAB UnRAR source is involved.
@@ -31,16 +32,25 @@ RAR is read with SharpCompress's own reader, so no RARLAB UnRAR source is involv
 
 ## Download
 
-Releases are signed with a self-made certificate (no paid signing). Its SHA-1 thumbprint will be listed here once the
-certificate exists: `TODO: paste the thumbprint printed by tools/New-SigningCert.ps1`. The release workflow refuses to
-publish until this section shows the real thumbprint.
+The easiest way to get Arca is through **Integra**, which installs and updates it without Windows' "unrecognized app"
+warning. Releases are also on the [Releases page](https://github.com/stephenstirling/arca/releases).
+
+Releases are signed with a self-made certificate (no paid signing). To check one: right-click `Arca.exe` > Properties >
+Digital Signatures > Details > View Certificate > Details > Thumbprint. The certificate is named **Arca** (Stephen
+Stirling) and its thumbprint is:
+
+`1F9679C588ECBC69AAD04C296DF662759C6ADC48`
+
+Windows will say the certificate isn't trusted. That's expected. The public certificate (**Arca-signing.cer**) is on each
+release, only so you can compare it.
 
 ## For Integra
 
 `integra-app.json` describes Arca the same way Porta's does. Switches: `Arca.exe --version`, `--status`, `--quit`
 (see `src/Arca/Cli.cs`). Settings live in `%LocalAppData%\Arca`, which updates and uninstalls leave alone.
-Before the first release: run `tools/New-SigningCert.ps1`, put its thumbprint in `integra-app.json` (replacing the
-all-zeros placeholder) and here, add the `ARCA_SIGNING_PFX_BASE64` and `ARCA_SIGNING_PFX_PASSWORD` repository secrets.
+Releases are signed by the release workflow with the certificate from `tools/New-SigningCert.ps1`, kept in the
+`ARCA_SIGNING_PFX_BASE64` and `ARCA_SIGNING_PFX_PASSWORD` repository secrets. Its thumbprint is in `integra-app.json`
+and above; a release whose signature doesn't match is refused.
 
 ## Build
 
