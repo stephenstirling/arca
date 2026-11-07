@@ -859,6 +859,13 @@ public sealed partial class MainWindow : Window
         await dialog.ShowAsync();
     }
 
+    private async void DefaultApps_Click(object sender, RoutedEventArgs e)
+    {
+        // Register first, so the page lists Arca even if the background registration at start-up has not finished.
+        await Task.Run(Associations.Register);
+        await Windows.System.Launcher.LaunchUriAsync(Associations.DefaultAppsPage);
+    }
+
     private void Cancel_Click(object sender, RoutedEventArgs e) => _cts?.Cancel();
 
     // ---------- Theme and options ----------

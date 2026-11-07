@@ -33,6 +33,8 @@ public partial class App : Application
             return;
         }
 
+        _ = Task.Run(Associations.Register);
+
         // "Arca.exe photos.zip" (or "Open with Arca") opens that archive straight away.
         var path = Environment.GetCommandLineArgs().Skip(1)
             .FirstOrDefault(a => !a.StartsWith("--", StringComparison.Ordinal) && File.Exists(a));
