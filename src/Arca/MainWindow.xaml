@@ -97,6 +97,8 @@
                 <MenuFlyoutSeparator />
                 <ToggleMenuFlyoutItem x:Name="SmartFolderItem" Text="Extract all: new folder when needed" Click="Option_Click" />
                 <ToggleMenuFlyoutItem x:Name="KeepMarkItem" Text="Keep the &quot;downloaded from the internet&quot; mark" Click="Option_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem Text="Make Arca the default for archives…" Click="DefaultApps_Click" />
             </MenuBarItem>
             <MenuBarItem Title="Help">
                 <MenuFlyoutItem Text="About Arca" Click="About_Click" />

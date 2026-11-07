@@ -9,6 +9,7 @@ namespace Arca;
 ///   Arca.exe --version   prints the version
 ///   Arca.exe --status    prints the version and whether any Arca window is open (exit code 0 = running, 1 = not)
 ///   Arca.exe --quit      closes every open Arca window and waits for them to go (exit code 0 = closed or wasn't running, 1 = still running)
+///   Arca.exe --unregister  removes Arca from "Open with" and Default apps (exit code 0 = done, 1 = the registry refused)
 /// Anything else starts Arca as usual (a file path opens that archive).
 /// Arca can have several windows at once, so "running" means "another Arca.exe process exists", found by name.
 /// </summary>
@@ -30,6 +31,8 @@ internal static class Cli
         }
         if (args.Any(a => a.Equals("--quit", StringComparison.OrdinalIgnoreCase)))
             return Quit();
+        if (args.Any(a => a.Equals("--unregister", StringComparison.OrdinalIgnoreCase)))
+            return Unregister();
         return null;
     }
 
@@ -89,6 +92,21 @@ internal static class Cli
         finally
         {
             foreach (var p in others) p.Dispose();
+        }
+    }
+
+    private static int Unregister()
+    {
+        try
+        {
+            Associations.Unregister();
+            Print("Arca removed from Open with and Default apps.");
+            return 0;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
+            Print("Could not change the registry: " + ex.Message);
+            return 1;
         }
     }
 
