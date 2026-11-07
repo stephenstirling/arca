@@ -205,12 +205,12 @@
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1,1,1,0">
             <Grid>
                 <ScrollViewer HorizontalScrollMode="Auto" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-                    <Grid MinWidth="900">
+                    <Grid MinWidth="980">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto" />
                             <RowDefinition Height="*" />
                         </Grid.RowDefinitions>
-                        <Grid Padding="14,4,14,4" ColumnSpacing="8" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
+                        <Grid Padding="14,4,14,4" ColumnSpacing="24" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,0,0,1">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" MinWidth="220" />
                                 <ColumnDefinition Width="110" />
@@ -239,7 +239,7 @@
                             </ListView.ItemContainerStyle>
                             <ListView.ItemTemplate>
                                 <DataTemplate x:DataType="local:EntryRow">
-                                    <Grid ColumnSpacing="8" ToolTipService.ToolTip="{x:Bind ToolTip}">
+                                    <Grid ColumnSpacing="24" ToolTipService.ToolTip="{x:Bind ToolTip}">
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*" MinWidth="220" />
                                             <ColumnDefinition Width="110" />

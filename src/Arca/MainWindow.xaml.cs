@@ -192,10 +192,12 @@ public sealed partial class MainWindow : Window
             SelectionText.Text = $"{ArchiveFormats.DisplayName(_listing.Format)} archive{(_listing.IsSolid ? ", solid" : "")}, {ArchiveService.FormatBytes(_listing.ArchiveSize)}";
         }
 
+        // Everything listed, folders included with all they hold, so a folder of 7 files doesn't read "0 bytes in 0 files".
         var shown = _rows.Where(r => r.Node is not null).Select(r => r.Node!).ToList();
         int folders = shown.Count(n => n.IsFolder);
-        var shownFiles = shown.Where(n => !n.IsFolder).ToList();
-        TotalText.Text = $"Total {folders:N0} {Plural(folders, "folder")} and {shownFiles.Sum(n => n.Size):N0} bytes in {shownFiles.Count:N0} {Plural(shownFiles.Count, "file")}";
+        int fileCount = shown.Sum(n => n.FileCount);
+        long total = shown.Sum(n => n.Size);
+        TotalText.Text = $"Total {folders:N0} {Plural(folders, "folder")} and {total:N0} bytes in {fileCount:N0} {Plural(fileCount, "file")}";
     }
 
     private static string Plural(int n, string word) => n == 1 ? word : word + "s";
