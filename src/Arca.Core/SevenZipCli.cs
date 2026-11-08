@@ -80,7 +80,7 @@ internal static class SevenZipCli
             args.Add("-p");
             args.Add(options.Format == CreateFormat.SevenZip ? "-mhe=on" : "-mem=AES256");
         }
-        args.Add("--");
+        // No "--" before these: 7za reads "@list" literally after it. The archive is a full path, so it never looks like a switch.
         args.Add(archive);
         args.Add("@" + listFile);
         return args;
