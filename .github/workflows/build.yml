@@ -21,6 +21,14 @@ jobs:
       - name: Publish (self-contained, win-x64)
         run: dotnet publish src/Arca -c Release -r win-x64 --self-contained true -o "${{ runner.temp }}/arca-build"
 
+      # 7z and password-protected archives need 7-Zip beside Arca.exe, and its licence needs its License.txt there too.
+      - name: Check 7-Zip is included
+        shell: pwsh
+        run: |
+          foreach ($f in '7-Zip/7za.exe', '7-Zip/License.txt') {
+            if (-not (Test-Path (Join-Path $env:RUNNER_TEMP "arca-build/$f"))) { throw "$f is missing from the build." }
+          }
+
       # Starts the real app and checks it stays open, so a crash on start shows up here, with its reason.
       - name: Startup check
         shell: pwsh
