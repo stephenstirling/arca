@@ -119,12 +119,21 @@ jobs:
           PRERELEASE: ${{ steps.ver.outputs.prerelease }}
         run: |
           $dir = Join-Path $env:RUNNER_TEMP 'release'
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $files = @((Join-Path $dir "Arca-$env:VERSION-win-x64.zip"), (Join-Path $dir 'SHA256SUMS.txt'), (Join-Path $dir 'Arca-signing.cer'), (Join-Path $dir 'integra-app.json'))
           $flags = @()
           if ($env:PRERELEASE -eq 'true') { $flags += '--prerelease' }
-          gh release create $env:TAG --verify-tag --title "Arca $env:VERSION" `
-            --notes-file (Join-Path $env:RUNNER_TEMP 'release-notes.md') @flags `
-            (Join-Path $dir "Arca-$env:VERSION-win-x64.zip") (Join-Path $dir 'SHA256SUMS.txt') (Join-Path $dir 'Arca-signing.cer') (Join-Path $dir 'integra-app.json')
-          if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
+          # Publishing from the Releases page creates the tag and an empty release at once; fill that one in.
+          gh release view $env:TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:TAG @files --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'gh release upload failed.' }
+            gh release edit $env:TAG --title "Arca $env:VERSION" --notes-file $notes @flags
+            if ($LASTEXITCODE -ne 0) { throw 'gh release edit failed.' }
+          } else {
+            gh release create $env:TAG --verify-tag --title "Arca $env:VERSION" --notes-file $notes @flags @files
+            if ($LASTEXITCODE -ne 0) { throw 'gh release create failed.' }
+          }
 
       - name: Keep the files (dry run only)
         if: steps.ver.outputs.publish != 'true'
