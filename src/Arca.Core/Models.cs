@@ -74,7 +74,11 @@ public sealed class ArchiveListing
     /// <summary>A solid archive compresses files together, so one damaged spot affects everything after it.</summary>
     public bool IsSolid { get; init; }
 
+    /// <summary>Size of every part together, for a multi-part archive.</summary>
     public long ArchiveSize { get; init; }
+
+    /// <summary>The archive's files: just <see cref="ArchivePath"/>, or every part of a multi-part archive in order.</summary>
+    public IReadOnlyList<string> Parts { get; init; } = [];
 
     public long TotalSize => Entries.Where(e => !e.IsDirectory).Sum(e => Math.Max(0, e.Size));
     public long TotalPacked => Entries.Where(e => !e.IsDirectory).Sum(e => Math.Max(0, e.CompressedSize));
@@ -109,4 +113,11 @@ public sealed class TestResult
     public string? AbortReason { get; set; }
 
     public bool AllGood => AbortReason is null && Failed.Count == 0;
+}
+
+/// <summary>The archive can't be read without a password (its file names are encrypted too), or the one given is wrong.</summary>
+public sealed class PasswordRequiredException(bool wrongPassword, Exception? inner = null)
+    : Exception(wrongPassword ? "That password is wrong." : "This archive is protected by a password.", inner)
+{
+    public bool WrongPassword { get; } = wrongPassword;
 }

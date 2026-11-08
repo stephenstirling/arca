@@ -19,4 +19,13 @@
          reader, so no RARLAB UnRAR source or licence terms come into it. -->
     <PackageReference Include="SharpCompress" Version="0.38.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- 7-Zip's command-line program, for creating 7z and password-protected archives (see third-party/7-Zip/README.md).
+         Copied into a "7-Zip" folder beside every program that uses this library: Arca itself and the tests. -->
+    <None Include="..\..\third-party\7-Zip\7za.exe;..\..\third-party\7-Zip\License.txt"
+          Link="7-Zip\%(Filename)%(Extension)"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

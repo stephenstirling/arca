@@ -37,6 +37,12 @@ Get-ChildItem $stage -Filter *.pdb -File | Remove-Item
 $ours = @(Get-ChildItem $stage -File | Where-Object { $_.Name -like 'Arca*.exe' -or $_.Name -like 'Arca*.dll' })
 if (-not ($ours | Where-Object Name -eq 'Arca.exe')) { throw 'Arca.exe was not published.' }
 
+# 7-Zip's licence allows signing its exe with another's certificate; signing it means every program in the folder is ours or vouched for.
+$sevenZip = Join-Path $stage '7-Zip\7za.exe'
+if (-not (Test-Path $sevenZip)) { throw '7-Zip\7za.exe was not published.' }
+if (-not (Test-Path (Join-Path $stage '7-Zip\License.txt'))) { throw "7-Zip's License.txt was not published, and its licence requires it." }
+$ours += Get-Item $sevenZip
+
 $cerPath = $null
 if ($PfxPath) {
     if (-not $env:ARCA_PFX_PASSWORD) { throw 'Set ARCA_PFX_PASSWORD to the certificate password.' }
@@ -57,7 +63,7 @@ if ($PfxPath) {
         $signed = $false
         foreach ($try in 1..3) {   # the timestamp server is a free public service and sometimes hiccups
             & $signtool.FullName sign /fd SHA256 /f $PfxPath /p $env:ARCA_PFX_PASSWORD `
-                /tr $TimestampUrl /td SHA256 /d 'Arca' $file.FullName
+                /tr $TimestampUrl /td SHA256 /d $(if ($file.Name -eq '7za.exe') { '7-Zip' } else { 'Arca' }) $file.FullName
             if ($LASTEXITCODE -eq 0) { $signed = $true; break }
             Start-Sleep -Seconds (5 * $try)
         }

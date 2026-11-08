@@ -12,6 +12,7 @@ public enum CreateFormat
     Tar,
     TarGz,
     TarBz2,
+    SevenZip,
 }
 
 public enum PackLevel
@@ -30,6 +31,15 @@ public sealed record CreateOptions
 
     /// <summary>Replace an existing file at the archive path. Off by default: creating never destroys anything.</summary>
     public bool Overwrite { get; init; }
+
+    /// <summary>
+    /// Encrypts with AES-256 (ZIP and 7z only; TAR has no encryption). A 7z also hides its file names; a ZIP can't,
+    /// and Windows' own zip folders can't open an AES-encrypted ZIP.
+    /// </summary>
+    public string? Password { get; init; }
+
+    /// <summary>The 7za.exe used for 7z and password-protected archives. Null means the copy shipped beside Arca.</summary>
+    public string? SevenZipPath { get; init; }
 }
 
 public sealed class CreateResult
@@ -53,6 +63,7 @@ public static class ArchiveWriter
         CreateFormat.Tar => ".tar",
         CreateFormat.TarGz => ".tar.gz",
         CreateFormat.TarBz2 => ".tar.bz2",
+        CreateFormat.SevenZip => ".7z",
         _ => ".zip",
     };
 
@@ -61,8 +72,12 @@ public static class ArchiveWriter
         CreateFormat.Tar => "TAR",
         CreateFormat.TarGz => "TAR.GZ",
         CreateFormat.TarBz2 => "TAR.BZ2",
+        CreateFormat.SevenZip => "7Z",
         _ => "ZIP",
     };
+
+    /// <summary>Whether <paramref name="format"/> can take a password.</summary>
+    public static bool SupportsPassword(CreateFormat format) => format is CreateFormat.Zip or CreateFormat.SevenZip;
 
     /// <summary>
     /// A sensible archive name for these items: the single item's name, or the folder they share
@@ -100,6 +115,9 @@ public static class ArchiveWriter
     {
         options ??= new CreateOptions();
         if (sources.Count == 0) throw new ArgumentException("Choose at least one file or folder.", nameof(sources));
+        bool encrypted = !string.IsNullOrEmpty(options.Password);
+        if (encrypted && !SupportsPassword(options.Format))
+            throw new ArgumentException($"{DisplayName(options.Format)} archives can't have a password. Choose ZIP or 7Z.", nameof(options));
 
         var target = Path.GetFullPath(archivePath);
         if (File.Exists(target) && !options.Overwrite)
@@ -117,6 +135,13 @@ public static class ArchiveWriter
 
         try
         {
+            if (options.Format == CreateFormat.SevenZip || encrypted)
+            {
+                SevenZipCli.Create(options.SevenZipPath ?? SevenZipCli.DefaultPath, temp, options, plan, result, progress, cancellationToken);
+                File.Move(temp, target, overwrite: options.Overwrite);
+                return result;
+            }
+
             using (var output = new FileStream(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             using (var writer = OpenWriter(output, options))
             {
