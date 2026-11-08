@@ -16,18 +16,18 @@ public static class ArchiveService
     public static ArchiveListing List(string archivePath, string? password = null, SafetyLimits? limits = null)
     {
         limits ??= SafetyLimits.Default;
-        var format = RequireReadable(archivePath);
-        var archiveLength = new FileInfo(archivePath).Length;
+        var (set, format) = RequireReadable(archivePath);
+        var archiveLength = set.TotalLength;
 
         var entries = new List<ArchiveEntryInfo>();
         var warnings = new List<ArchiveWarning>();
         bool tooMany = false;
 
         // Entries are only looked at here, never opened; for a .tar.gz the reader steps over each file's data.
-        var isSolid = Walk(archivePath, format, new ReaderOptions { Password = password }, (e, open) =>
+        var isSolid = WalkAskingForPassword(set, format, password, (e, open) =>
         {
             if (entries.Count >= limits.MaxEntries) { tooMany = true; return false; }
-            var name = EntryName(e, archivePath);
+            var name = EntryName(e, set);
             var unsafeReason = EntryPathGuard.CheckName(name, out _);
             entries.Add(new ArchiveEntryInfo(name, e.IsDirectory, e.Size, e.CompressedSize, e.IsEncrypted, e.LastModifiedTime, unsafeReason, e.Crc));
             return true;
@@ -59,6 +59,7 @@ public static class ArchiveService
             Warnings = warnings,
             IsSolid = isSolid,
             ArchiveSize = archiveLength,
+            Parts = set.Parts,
         };
     }
 
@@ -79,17 +80,17 @@ public static class ArchiveService
     {
         options ??= new ExtractOptions();
         var limits = options.Limits;
-        var format = RequireReadable(archivePath);
+        var (set, format) = RequireReadable(archivePath);
 
-        var archiveLength = new FileInfo(archivePath).Length;
+        var archiveLength = set.TotalLength;
         var mark = options.PropagateMarkOfTheWeb ? MarkOfTheWeb.Read(archivePath) : null;
         var readerOptions = new ReaderOptions { Password = options.Password };
         var only = options.Only?.Select(ArchivePaths.Normalize).ToList();
         var strip = ArchivePaths.Normalize(options.StripPrefix);
 
         var root = Path.GetFullPath(destinationFolder);
-        if (only is null && options.SmartFolder && NeedsWrapperFolder(archivePath, format, readerOptions))
-            root = UniquePath(Path.Combine(root, WrapperFolderName(archivePath)));
+        if (only is null && options.SmartFolder && NeedsWrapperFolder(set, format, readerOptions))
+            root = UniquePath(Path.Combine(root, WrapperFolderName(set)));
         Directory.CreateDirectory(root);
 
         var result = new ExtractResult { Destination = root };
@@ -108,7 +109,7 @@ public static class ArchiveService
                 return false;
             }
 
-            var name = EntryName(entry, archivePath);
+            var name = EntryName(entry, set);
             var normalized = ArchivePaths.Normalize(name);
             if (only is not null && !only.Any(p => ArchivePaths.IsUnder(normalized, p))) return true;
 
@@ -202,7 +203,7 @@ public static class ArchiveService
             return true;
         }
 
-        Walk(archivePath, format, readerOptions, Handle);
+        Walk(set, format, readerOptions, Handle);
         return result;
     }
 
@@ -220,9 +221,9 @@ public static class ArchiveService
         SafetyLimits? limits = null)
     {
         limits ??= SafetyLimits.Default;
-        var format = RequireReadable(archivePath);
+        var (set, format) = RequireReadable(archivePath);
 
-        var meter = new Meter(limits, new FileInfo(archivePath).Length);
+        var meter = new Meter(limits, set.TotalLength);
         var result = new TestResult();
         var buffer = new byte[81920];
         int seen = 0;
@@ -237,7 +238,7 @@ public static class ArchiveService
             }
             if (entry.IsDirectory) return true;
 
-            var name = EntryName(entry, archivePath);
+            var name = EntryName(entry, set);
             if (entry.IsEncrypted && string.IsNullOrEmpty(password))
             {
                 result.Skipped.Add(new SkippedEntry(name, "it is password-protected and no password was given"));
@@ -281,7 +282,7 @@ public static class ArchiveService
             return true;
         }
 
-        Walk(archivePath, format, new ReaderOptions { Password = password }, Handle);
+        Walk(set, format, new ReaderOptions { Password = password }, Handle);
         return result;
     }
 
@@ -290,11 +291,11 @@ public static class ArchiveService
     /// archive is solid. GZip, BZip2 and XZ are read as a stream, which is also what finds the TAR inside a .tar.gz
     /// (opened as an archive, it would look like one big .tar file).
     /// </summary>
-    private static bool Walk(string archivePath, ArchiveFormat format, ReaderOptions readerOptions, Func<IEntry, Func<Stream>, bool> handle)
+    private static bool Walk(VolumeSet set, ArchiveFormat format, ReaderOptions readerOptions, Func<IEntry, Func<Stream>, bool> handle)
     {
         if (format is ArchiveFormat.Gzip or ArchiveFormat.Bzip2 or ArchiveFormat.Xz)
         {
-            using var stream = new FileStream(archivePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var stream = OpenWhole(set);
             using var streamReader = ReaderFactory.Open(stream, readerOptions);
             while (streamReader.MoveToNextEntry())
             {
@@ -303,9 +304,47 @@ public static class ArchiveService
             return false;
         }
 
-        using var archive = ArchiveFactory.Open(archivePath, readerOptions);
+        if (set.Kind == VolumeKind.Split)
+        {
+            using var stream = OpenWhole(set);
+            using var joined = ArchiveFactory.Open(stream, readerOptions);
+            Walk(joined, handle);
+            return joined.IsSolid;
+        }
+
+        // RAR volumes and spanned ZIPs: SharpCompress finds the other parts itself from the one it is given.
+        using var archive = ArchiveFactory.Open(set.OpenPath, readerOptions);
         Walk(archive, handle);
         return archive.IsSolid;
+    }
+
+    /// <summary>The archive as one stream: the file itself, or all the pieces of a split archive end to end.</summary>
+    private static Stream OpenWhole(VolumeSet set) => set.Kind == VolumeKind.Split
+        ? new ConcatenatedStream(set.Parts)
+        : new FileStream(set.OpenPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+    /// <summary>
+    /// <see cref="Walk(VolumeSet, ArchiveFormat, ReaderOptions, Func{IEntry, Func{Stream}, bool})"/> for an archive whose
+    /// file names may themselves be encrypted (7z made with "encrypt file names", RAR with -hp): nothing can be listed
+    /// without the password, so that becomes a <see cref="PasswordRequiredException"/> the caller can ask about.
+    /// </summary>
+    private static bool WalkAskingForPassword(VolumeSet set, ArchiveFormat format, string? password, Func<IEntry, Func<Stream>, bool> handle)
+    {
+        try
+        {
+            return Walk(set, format, new ReaderOptions { Password = password }, handle);
+        }
+        catch (CryptographicException) when (string.IsNullOrEmpty(password))
+        {
+            throw new PasswordRequiredException(wrongPassword: false);
+        }
+        catch (Exception ex) when (!string.IsNullOrEmpty(password) && ex is not (OutOfMemoryException or OperationCanceledException or MissingPartException or FileNotFoundException or UnauthorizedAccessException))
+        {
+            // Names decrypted with the wrong key come out as nonsense headers, which fail in assorted ways
+            // (some of SharpCompress's exception types aren't even public). A password is only ever passed here
+            // after the archive asked for one, so the password is the likely culprit.
+            throw new PasswordRequiredException(wrongPassword: true, ex);
+        }
     }
 
     private static void Walk(IArchive archive, Func<IEntry, Func<Stream>, bool> handle)
@@ -356,27 +395,57 @@ public static class ArchiveService
         }
     }
 
-    private static ArchiveFormat RequireReadable(string archivePath)
+    /// <summary>Whether <paramref name="path"/> is an archive (or a part of one) that Arca can open.</summary>
+    public static bool CanOpen(string path)
     {
-        var format = FormatDetector.DetectFile(archivePath);
+        try
+        {
+            RequireReadable(path);
+            return true;
+        }
+        catch (Exception ex) when (ex is NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static (VolumeSet Set, ArchiveFormat Format) RequireReadable(string archivePath)
+    {
+        var set = Volumes.Find(archivePath);
+        var format = Detect(set);
         if (format == ArchiveFormat.Unknown)
             throw new NotSupportedException("Arca doesn't recognise this file as an archive.");
         if (!ArchiveFormats.CanRead(format))
             throw new NotSupportedException($"{ArchiveFormats.DisplayName(format)} archives aren't supported yet.");
-        return format;
+        return (set, format);
+    }
+
+    private static ArchiveFormat Detect(VolumeSet set)
+    {
+        switch (set.Kind)
+        {
+            case VolumeKind.ZipSpanned:
+                // The .zip of a spanned set is its last part and usually starts mid-file, without the ZIP signature.
+                return ArchiveFormat.Zip;
+            case VolumeKind.Split:
+                using (var stream = new ConcatenatedStream(set.Parts))
+                    return FormatDetector.Detect(stream, set.BaseName);
+            default:
+                return FormatDetector.DetectFile(set.OpenPath);
+        }
     }
 
     /// <summary>Single-file formats like .gz can come without a stored name; use the archive's own name minus its extension.</summary>
-    private static string EntryName(IEntry entry, string archivePath)
+    private static string EntryName(IEntry entry, VolumeSet set)
     {
         var key = entry.Key;
-        return string.IsNullOrEmpty(key) ? Path.GetFileNameWithoutExtension(archivePath) : key;
+        return string.IsNullOrEmpty(key) ? Path.GetFileNameWithoutExtension(set.BaseName) : key;
     }
 
-    private static bool NeedsWrapperFolder(string archivePath, ArchiveFormat format, ReaderOptions readerOptions)
+    private static bool NeedsWrapperFolder(VolumeSet set, ArchiveFormat format, ReaderOptions readerOptions)
     {
         var topLevel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(archivePath, format, readerOptions, (entry, _) =>
+        Walk(set, format, readerOptions, (entry, _) =>
         {
             var key = entry.Key;
             if (string.IsNullOrEmpty(key)) return true;
@@ -388,9 +457,9 @@ public static class ArchiveService
         return topLevel.Count > 1;
     }
 
-    private static string WrapperFolderName(string archivePath)
+    private static string WrapperFolderName(VolumeSet set)
     {
-        var name = Path.GetFileNameWithoutExtension(archivePath);
+        var name = Path.GetFileNameWithoutExtension(set.BaseName);
         if (name.EndsWith(".tar", StringComparison.OrdinalIgnoreCase)) name = name[..^4];
         foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
         name = name.Trim().TrimEnd('.', ' ');

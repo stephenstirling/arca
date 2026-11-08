@@ -63,26 +63,44 @@ public sealed partial class MainWindow : Window
     // ---------- Opening and showing an archive ----------
 
     /// <summary>Reads the archive's contents and shows them. Nothing is extracted.</summary>
-    public async Task LoadAsync(string path)
+    /// <param name="password">Already known (just used to create the archive): opens without asking.</param>
+    public async Task LoadAsync(string path, string? password = null)
     {
         if (_busy) return;
         HideMessage();
-        SetBusy("Reading " + Path.GetFileName(path) + "…");
-        try
+        bool wrong = false;
+        while (true)
         {
-            var listing = await Task.Run(() => ArchiveService.List(path));
-            ShowArchive(listing);
-            if (listing.Warnings.Count > 0)
-                ShowMessage(InfoBarSeverity.Warning, "Check this archive before extracting", string.Join("\n", listing.Warnings.Select(w => w.Message)));
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            // Damaged or hostile archives can fail in many ways; all of them end up as a plain message.
-            ShowMessage(InfoBarSeverity.Error, "Couldn't open " + Path.GetFileName(path), ex.Message);
-        }
-        finally
-        {
-            SetBusy(null);
+            SetBusy("Reading " + Path.GetFileName(path) + "…");
+            try
+            {
+                var listing = await Task.Run(() => ArchiveService.List(path, password));
+                ShowArchive(listing);
+                _password = password;
+                if (listing.Warnings.Count > 0)
+                    ShowMessage(InfoBarSeverity.Warning, "Check this archive before extracting", string.Join("\n", listing.Warnings.Select(w => w.Message)));
+                return;
+            }
+            catch (PasswordRequiredException ex)
+            {
+                // Its file names are encrypted too, so even the list needs the password.
+                wrong = ex.WrongPassword;
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // Damaged or hostile archives can fail in many ways; all of them end up as a plain message.
+                ShowMessage(InfoBarSeverity.Error, "Couldn't open " + Path.GetFileName(path), ex.Message);
+                return;
+            }
+            finally
+            {
+                SetBusy(null);
+            }
+
+            password = await AskPasswordAsync(
+                wrong ? "That password is wrong" : "This archive is password-protected",
+                wrong ? "Try again. Passwords are case-sensitive." : "Its file names are hidden too, so Arca needs the password to show what's inside.");
+            if (password is null) return;
         }
     }
 
@@ -189,7 +207,8 @@ public sealed partial class MainWindow : Window
         }
         else
         {
-            SelectionText.Text = $"{ArchiveFormats.DisplayName(_listing.Format)} archive{(_listing.IsSolid ? ", solid" : "")}, {ArchiveService.FormatBytes(_listing.ArchiveSize)}";
+            var parts = _listing.Parts.Count > 1 ? $" in {_listing.Parts.Count:N0} parts" : "";
+            SelectionText.Text = $"{ArchiveFormats.DisplayName(_listing.Format)} archive{(_listing.IsSolid ? ", solid" : "")}, {ArchiveService.FormatBytes(_listing.ArchiveSize)}{parts}";
         }
 
         var shown = _rows.Where(r => r.Node is not null).Select(r => r.Node!).ToList();
@@ -323,7 +342,7 @@ public sealed partial class MainWindow : Window
         if (folder is not null) await CreateArchiveAsync(new List<string> { folder });
     }
 
-    private static readonly CreateFormat[] CreateFormats = { CreateFormat.Zip, CreateFormat.TarGz, CreateFormat.TarBz2, CreateFormat.Tar };
+    private static readonly CreateFormat[] CreateFormats = { CreateFormat.Zip, CreateFormat.SevenZip, CreateFormat.TarGz, CreateFormat.TarBz2, CreateFormat.Tar };
     private static readonly PackLevel[] PackLevels = { PackLevel.Normal, PackLevel.Maximum, PackLevel.Fast, PackLevel.Store };
 
     /// <summary>Asks for a name, format and place, makes the archive, then opens it.</summary>
@@ -352,6 +371,9 @@ public sealed partial class MainWindow : Window
             SelectedIndex = 0,
             MinWidth = 170,
         };
+        var passwordBox = new PasswordBox { Header = "Password (optional)", MinWidth = 200 };
+        var repeatBox = new PasswordBox { Header = "Type it again", MinWidth = 200 };
+        var passwordHint = new TextBlock { TextWrapping = TextWrapping.Wrap, Opacity = 0.75 };
         var whereText = new TextBlock { Text = saveIn, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
         var changeButton = new Button { Content = "Change…" };
         var problem = new InfoBar { Severity = InfoBarSeverity.Error, IsClosable = false, IsOpen = false };
@@ -361,7 +383,24 @@ public sealed partial class MainWindow : Window
             var format = CreateFormats[Math.Max(0, formatBox.SelectedIndex)];
             nameBox.Text = StripArchiveExtension(nameBox.Text.Trim()) + ArchiveWriter.Extension(format);
             levelBox.IsEnabled = format != CreateFormat.Tar;   // plain TAR isn't compressed
+            UpdatePasswordHint();
         };
+        passwordBox.PasswordChanged += (_, _) => UpdatePasswordHint();
+
+        void UpdatePasswordHint()
+        {
+            var format = CreateFormats[Math.Max(0, formatBox.SelectedIndex)];
+            bool can = ArchiveWriter.SupportsPassword(format);
+            passwordBox.IsEnabled = repeatBox.IsEnabled = can;
+            passwordHint.Text = !can
+                ? "TAR archives can't have a password. Choose ZIP or 7Z for one."
+                : passwordBox.Password.Length == 0
+                    ? "Leave empty for no password."
+                    : format == CreateFormat.SevenZip
+                        ? "Encrypted with AES-256. File names are hidden too, so nothing in it can be seen without the password."
+                        : "Encrypted with AES-256. File names stay visible, and Windows' own zip folders can't open it: use Arca or 7-Zip.";
+        }
+        UpdatePasswordHint();
         changeButton.Click += async (_, _) =>
         {
             var picked = await PickFolderAsync();
@@ -381,10 +420,16 @@ public sealed partial class MainWindow : Window
         options.Children.Add(formatBox);
         options.Children.Add(levelBox);
 
+        var passwords = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
+        passwords.Children.Add(passwordBox);
+        passwords.Children.Add(repeatBox);
+
         var panel = new StackPanel { Spacing = 14, MinWidth = 420 };
         panel.Children.Add(summary);
         panel.Children.Add(nameBox);
         panel.Children.Add(options);
+        panel.Children.Add(passwords);
+        panel.Children.Add(passwordHint);
         panel.Children.Add(new TextBlock { Text = "Save in", Margin = new Thickness(0, 0, 0, -8) });
         panel.Children.Add(whereRow);
         panel.Children.Add(problem);
@@ -411,6 +456,13 @@ public sealed partial class MainWindow : Window
                 args.Cancel = true;
                 return;
             }
+            if (passwordBox.IsEnabled && passwordBox.Password != repeatBox.Password)
+            {
+                problem.Message = "The two passwords don't match. Type the same password in both boxes.";
+                problem.IsOpen = true;
+                args.Cancel = true;
+                return;
+            }
             if (!name.EndsWith(ArchiveWriter.Extension(format), StringComparison.OrdinalIgnoreCase))
                 name = StripArchiveExtension(name) + ArchiveWriter.Extension(format);
             var candidate = Path.Combine(saveIn, name);
@@ -430,14 +482,18 @@ public sealed partial class MainWindow : Window
         {
             Format = CreateFormats[Math.Max(0, formatBox.SelectedIndex)],
             Level = PackLevels[Math.Max(0, levelBox.SelectedIndex)],
+            Password = passwordBox.IsEnabled && passwordBox.Password.Length > 0 ? passwordBox.Password : null,
         };
         var archiveName = Path.GetFileName(target);
 
         HideMessage();
         SetBusy("Creating " + archiveName + "…");
         var token = NewToken();
+        // 7-Zip reports how far it is through the bytes, not a file count.
         var progress = new Progress<ExtractProgress>(p =>
-            BusyText.Text = $"Packing: {p.FilesExtracted:N0} files, {ArchiveService.FormatBytes(p.BytesWritten)}   {p.CurrentEntry}");
+            BusyText.Text = p.FilesExtracted > 0
+                ? $"Packing: {p.FilesExtracted:N0} files, {ArchiveService.FormatBytes(p.BytesWritten)}   {p.CurrentEntry}"
+                : $"Packing: {ArchiveService.FormatBytes(p.BytesWritten)}   {p.CurrentEntry}");
         CreateResult result;
         try
         {
@@ -458,7 +514,7 @@ public sealed partial class MainWindow : Window
             SetBusy(null);
         }
 
-        await LoadAsync(result.ArchivePath);
+        await LoadAsync(result.ArchivePath, createOptions.Password);
 
         long size = 0;
         try { size = new FileInfo(result.ArchivePath).Length; } catch (IOException) { }
@@ -478,15 +534,14 @@ public sealed partial class MainWindow : Window
 
     private static string StripArchiveExtension(string name)
     {
-        foreach (var ext in new[] { ".tar.gz", ".tar.bz2", ".tgz", ".tar", ".zip" })
+        foreach (var ext in new[] { ".tar.gz", ".tar.bz2", ".tgz", ".tar", ".zip", ".7z" })
             if (name.EndsWith(ext, StringComparison.OrdinalIgnoreCase)) return name[..^ext.Length];
         return name;
     }
 
     private static bool IsReadableArchive(string path)
     {
-        try { return ArchiveFormats.CanRead(FormatDetector.DetectFile(path)); }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return false; }
+        return ArchiveService.CanOpen(path);
     }
 
     private void CloseArchive_Click(object sender, RoutedEventArgs e)
@@ -808,6 +863,8 @@ public sealed partial class MainWindow : Window
         Row("Location", Path.GetDirectoryName(l.ArchivePath) ?? "");
         Row("Format", ArchiveFormats.DisplayName(l.Format) + (l.IsSolid ? ", solid" : ""));
         Row("Archive size", $"{ArchiveService.FormatBytes(l.ArchiveSize)} ({l.ArchiveSize:N0} bytes)");
+        if (l.Parts.Count > 1)
+            Row("Parts", $"{l.Parts.Count:N0}: {Path.GetFileName(l.Parts[0])} to {Path.GetFileName(l.Parts[^1])}");
         Row("Contents", $"{l.FileCount:N0} {Plural(l.FileCount, "file")} in {folders:N0} {Plural(folders, "folder")}");
         Row("Unpacked size", $"{ArchiveService.FormatBytes(unpacked)} ({unpacked:N0} bytes)");
         Row("Packed size", $"{ArchiveService.FormatBytes(packed)}" + (unpacked > 0 ? $" ({100.0 * packed / unpacked:0.#}% of the original)" : ""));
@@ -941,20 +998,29 @@ public sealed partial class MainWindow : Window
     private async Task<bool> EnsurePasswordAsync()
     {
         if (_password is not null) return true;
+        _password = await AskPasswordAsync("This archive has password-protected files", null);
+        return _password is not null;
+    }
+
+    /// <summary>The password typed, or null when cancelled or left empty.</summary>
+    private async Task<string?> AskPasswordAsync(string title, string? explanation)
+    {
         var box = new PasswordBox { PlaceholderText = "Password" };
+        var panel = new StackPanel { Spacing = 12 };
+        if (explanation is not null) panel.Children.Add(new TextBlock { Text = explanation, TextWrapping = TextWrapping.Wrap });
+        panel.Children.Add(box);
         var dialog = new ContentDialog
         {
-            Title = "This archive has password-protected files",
-            Content = box,
+            Title = title,
+            Content = panel,
             PrimaryButtonText = "OK",
             CloseButtonText = "Cancel",
             DefaultButton = ContentDialogButton.Primary,
             XamlRoot = Root.XamlRoot,
             RequestedTheme = Root.ActualTheme,
         };
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary || box.Password.Length == 0) return false;
-        _password = box.Password;
-        return true;
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || box.Password.Length == 0) return null;
+        return box.Password;
     }
 
     private CancellationToken NewToken()

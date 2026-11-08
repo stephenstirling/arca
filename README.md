@@ -15,19 +15,22 @@ that [Integra](https://github.com/stephenstirling/integra) installs and updates.
 | | Status in this scaffold |
 |---|---|
 | ZIP, 7z, RAR, RAR5, TAR (+ gz, bz2, xz) | Read and extract |
+| Multi-part archives: `.part1.rar` / `.rar` + `.r00`, `.7z.001` (any split), `.z01` + `.zip` | Read and extract, opened from any part |
 | Zstandard, Brotli, LZ4, ZPAQ, ISO, WIM, CAB, VHD, DMG, SquashFS, CPIO, RPM, DEB, MSI, CBZ/CBR/CB7 | Planned (ISO, CAB and Zstandard are already recognised and reported as "not supported yet") |
-| Creating ZIP, TAR, TAR.GZ, TAR.BZ2 | Yes (Add button, or drop files on the window) |
-| Creating 7z, Zstandard | Planned |
+| Creating ZIP, 7z, TAR, TAR.GZ, TAR.BZ2 | Yes (Add button, or drop files on the window) |
+| Passwords on new ZIP and 7z archives (AES-256; a 7z also hides its file names) | Yes |
+| Creating Zstandard, creating split archives | Planned |
 | Creating RAR | Not possible without a RARLAB licence. Planned: use the user's own `rar.exe` if WinRAR is installed |
 
-RAR is read with SharpCompress's own reader, so no RARLAB UnRAR source is involved.
+RAR is read with SharpCompress's own reader, so no RARLAB UnRAR source is involved. 7z and password-protected
+archives are created with 7-Zip's own `7za.exe` (LGPL), which ships beside Arca; see `third-party/7-Zip/README.md`.
 
 ## Roadmap (from the WinRAR / 7-Zip gap list)
 
 1. Preview files inside an archive without extracting; thumbnail grid for photo archives (pairs with Ocula)
 2. Windows 11 context-menu entry, Defender scan before extraction
 3. Background queue with taskbar progress; presets (email-friendly, max compression, backup)
-4. Split / merge multi-part archives, repair damaged archives, compare two archives
+4. Create split archives, repair damaged archives, compare two archives
 5. Open from OneDrive / SMB / WebDAV without a full download
 
 ## Download

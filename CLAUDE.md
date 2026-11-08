@@ -19,12 +19,16 @@ src\Arca\bin\x64\Debug\net8.0-windows10.0.19041.0\win-x64\Arca.exe  [archive fil
 - `src/Arca.Core/` - plain .NET library, no UI. `ArchiveFormat.cs` (format detection by content),
   `EntryPathGuard.cs` (refuses `../`, absolute paths, device names, streams, links),
   `ArchiveService.cs` (list, extract, test, with size and zip-bomb limits), `ArchiveTree.cs` (folders from the
-  flat list of names), `FileAssociations.cs` (what Arca registers for "Open with"), `Crc32.cs`, `MarkOfTheWeb.cs`, `Models.cs`
+  flat list of names), `Volumes.cs` (finds every part of a multi-part archive), `ConcatenatedStream.cs`,
+  `ArchiveWriter.cs` (creates archives), `SevenZipCli.cs` (runs the bundled 7za.exe for 7z and password-protected
+  archives), `FileAssociations.cs` (what Arca registers for "Open with"), `Crc32.cs`, `MarkOfTheWeb.cs`, `Models.cs`
 - `src/Arca/` - the WinUI 3 app. `Program.cs` entry point, `Cli.cs` (the switches Integra uses),
   `MainWindow.xaml(.cs)` the WinRAR-style window (menu, toolbar, path bar, file list, status bar, light/dark),
   `Associations.cs` writes the "Open with" / Default apps registration on every start (`--unregister` removes it),
   `EntryRow.cs` one list row, `ShellInfo.cs` Windows' own file-type names and icons, `SettingsStore.cs`
-- `tests/Arca.Core.Tests/` - xUnit tests for the core (run on any OS)
+- `tests/Arca.Core.Tests/` - xUnit tests for the core (run on any OS; the 7za.exe ones only do anything on Windows)
+- `third-party/7-Zip/` - 7-Zip's `7za.exe` and its `License.txt`, copied beside Arca.exe into `7-Zip\`; the README
+  there says where it came from and how to update it
 - `integra-app.json` - tells Integra how to install, update and stop Arca (same contract as Porta's)
 - `tools/` - release scripts, copied from Porta (`Build-Release.ps1`, `New-IntegraManifest.ps1`,
   `New-ReleaseNotes.ps1`, one-time `New-SigningCert.ps1`)
