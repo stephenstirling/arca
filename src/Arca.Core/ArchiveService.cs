@@ -84,12 +84,11 @@ public static class ArchiveService
 
         var archiveLength = set.TotalLength;
         var mark = options.PropagateMarkOfTheWeb ? MarkOfTheWeb.Read(archivePath) : null;
-        var readerOptions = new ReaderOptions { Password = options.Password };
         var only = options.Only?.Select(ArchivePaths.Normalize).ToList();
         var strip = ArchivePaths.Normalize(options.StripPrefix);
 
         var root = Path.GetFullPath(destinationFolder);
-        if (only is null && options.SmartFolder && NeedsWrapperFolder(set, format, readerOptions))
+        if (only is null && options.SmartFolder && NeedsWrapperFolder(set, format, options.Password))
             root = UniquePath(Path.Combine(root, WrapperFolderName(set)));
         Directory.CreateDirectory(root);
 
@@ -203,7 +202,7 @@ public static class ArchiveService
             return true;
         }
 
-        Walk(set, format, readerOptions, Handle);
+        WalkAskingForPassword(set, format, options.Password, Handle, passwordIsSuspect: false);
         return result;
     }
 
@@ -282,7 +281,7 @@ public static class ArchiveService
             return true;
         }
 
-        Walk(set, format, new ReaderOptions { Password = password }, Handle);
+        WalkAskingForPassword(set, format, password, Handle, passwordIsSuspect: false);
         return result;
     }
 
@@ -328,7 +327,12 @@ public static class ArchiveService
     /// file names may themselves be encrypted (7z made with "encrypt file names", RAR with -hp): nothing can be listed
     /// without the password, so that becomes a <see cref="PasswordRequiredException"/> the caller can ask about.
     /// </summary>
-    private static bool WalkAskingForPassword(VolumeSet set, ArchiveFormat format, string? password, Func<IEntry, Func<Stream>, bool> handle)
+    /// <param name="passwordIsSuspect">
+    /// Treat any failure with a password given as a wrong password. Only right while listing, where a wrong key garbles
+    /// the names; while extracting, a full disk would otherwise be reported as a wrong password.
+    /// </param>
+    private static bool WalkAskingForPassword(
+        VolumeSet set, ArchiveFormat format, string? password, Func<IEntry, Func<Stream>, bool> handle, bool passwordIsSuspect = true)
     {
         try
         {
@@ -338,7 +342,7 @@ public static class ArchiveService
         {
             throw new PasswordRequiredException(wrongPassword: false);
         }
-        catch (Exception ex) when (!string.IsNullOrEmpty(password) && ex is not (OutOfMemoryException or OperationCanceledException or MissingPartException or FileNotFoundException or UnauthorizedAccessException))
+        catch (Exception ex) when (passwordIsSuspect && !string.IsNullOrEmpty(password) && ex is not (OutOfMemoryException or OperationCanceledException or MissingPartException or FileNotFoundException or UnauthorizedAccessException))
         {
             // Names decrypted with the wrong key come out as nonsense headers, which fail in assorted ways
             // (some of SharpCompress's exception types aren't even public). A password is only ever passed here
@@ -442,10 +446,10 @@ public static class ArchiveService
         return string.IsNullOrEmpty(key) ? Path.GetFileNameWithoutExtension(set.BaseName) : key;
     }
 
-    private static bool NeedsWrapperFolder(VolumeSet set, ArchiveFormat format, ReaderOptions readerOptions)
+    private static bool NeedsWrapperFolder(VolumeSet set, ArchiveFormat format, string? password)
     {
         var topLevel = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        Walk(set, format, readerOptions, (entry, _) =>
+        WalkAskingForPassword(set, format, password, (entry, _) =>
         {
             var key = entry.Key;
             if (string.IsNullOrEmpty(key)) return true;
@@ -453,8 +457,18 @@ public static class ArchiveService
             if (first is null || first == ".") return true;
             topLevel.Add(first);
             return topLevel.Count <= 1;   // two different top-level names is enough to know
-        });
+        }, passwordIsSuspect: false);
         return topLevel.Count > 1;
+    }
+
+    /// <summary>
+    /// A new folder beside the archive, named after it ("photos.zip" → "photos", "photos (1)" if that exists), for
+    /// "Extract to a folder". The folder is not created.
+    /// </summary>
+    public static string OwnFolderFor(string archivePath)
+    {
+        var set = Volumes.Find(archivePath);
+        return UniquePath(Path.Combine(Path.GetDirectoryName(set.OpenPath)!, WrapperFolderName(set)));
     }
 
     private static string WrapperFolderName(VolumeSet set)

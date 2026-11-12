@@ -35,6 +35,7 @@ public sealed partial class MainWindow : Window
     private string? _password;
     private CancellationTokenSource? _cts;
     private bool _busy;
+    private bool _draggingOut;
     private string _sortBy = "Name";
     private bool _sortDescending;
 
@@ -53,11 +54,13 @@ public sealed partial class MainWindow : Window
         ApplyTheme(_settings.Theme);
         SmartFolderItem.IsChecked = _settings.SmartFolder;
         KeepMarkItem.IsChecked = _settings.KeepInternetMark;
+        ExplorerMenuItem.IsChecked = _settings.ExplorerMenu;
         UpdateHeaders();
         ShowArchive(null);
 
         Closed += (_, _) => _cts?.Cancel();   // closing the window (or Integra's --quit) stops a running job
         _ = Task.Run(CleanOldViewFiles);
+        _ = Task.Run(CleanOldDragFiles);
     }
 
     // ---------- Opening and showing an archive ----------
@@ -269,6 +272,11 @@ public sealed partial class MainWindow : Window
             GoUp();
             e.Handled = true;
         }
+        else if (e.Key == VirtualKey.Delete && EditProblem() is null)
+        {
+            _ = DeleteSelectedAsync();
+            e.Handled = true;
+        }
     }
 
     private void EntryList_SelectionChanged(object sender, SelectionChangedEventArgs e) => UpdateStatus();
@@ -348,9 +356,10 @@ public sealed partial class MainWindow : Window
     private static readonly PackLevel[] PackLevels = { PackLevel.Normal, PackLevel.Maximum, PackLevel.Fast, PackLevel.Store };
 
     /// <summary>Asks for a name, format and place, makes the archive, then opens it.</summary>
-    private async Task CreateArchiveAsync(IReadOnlyList<string> sources)
+    public async Task CreateArchiveAsync(IReadOnlyList<string> sources)
     {
         if (_busy || sources.Count == 0) return;
+        await WhenLoadedAsync();   // started from Explorer, this runs before the window has a XamlRoot for its dialog
 
         var first = Path.TrimEndingDirectorySeparator(sources[0]);
         var saveIn = Path.GetDirectoryName(first);
@@ -978,6 +987,14 @@ public sealed partial class MainWindow : Window
         SettingsStore.Save(_settings);
     }
 
+    private void ExplorerMenu_Click(object sender, RoutedEventArgs e)
+    {
+        _settings.ExplorerMenu = ExplorerMenuItem.IsChecked;
+        SettingsStore.Save(_settings);
+        var on = _settings.ExplorerMenu;
+        _ = Task.Run(() => Associations.ApplyExplorerMenu(on));
+    }
+
     private void Option_Click(object sender, RoutedEventArgs e)
     {
         _settings.SmartFolder = SmartFolderItem.IsChecked;
@@ -1047,6 +1064,10 @@ public sealed partial class MainWindow : Window
         foreach (var control in new Control[] { ExtractButton, TestButton, ViewButton, FindButton, InfoButton, ScanButton })
             SetEnabled(control, ready);
         SetEnabled(FindBox, _listing is not null);
+
+        bool editable = ready && EditProblem() is null;
+        foreach (var item in new MenuFlyoutItem[] { AddIntoFilesItem, AddIntoFolderItem, AddIntoFilesMenuItem, AddIntoFolderMenuItem, NewFolderMenuItem, RenameMenuItem, DeleteMenuItem })
+            item.IsEnabled = editable;
     }
 
     /// <summary>Disabled toolbar buttons also fade, since their icons keep the accent colour.</summary>
@@ -1083,8 +1104,22 @@ public sealed partial class MainWindow : Window
 
     // ---------- Drag and drop ----------
 
+    private Task WhenLoadedAsync()
+    {
+        if (Root.IsLoaded) return Task.CompletedTask;
+        var loaded = new TaskCompletionSource();
+        Root.Loaded += (_, _) => loaded.TrySetResult();
+        return loaded.Task;
+    }
+
     private void Root_DragOver(object sender, DragEventArgs e)
     {
+        // Files dragged out of the list and back in would be added to the archive they came from.
+        if (_draggingOut)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
         e.AcceptedOperation = DataPackageOperation.Copy;
         e.DragUIOverride.Caption = "Open, or pack into a new archive";
     }
@@ -1096,10 +1131,360 @@ public sealed partial class MainWindow : Window
         var paths = items.Select(i => i.Path).Where(p => !string.IsNullOrEmpty(p)).ToList();
         if (paths.Count == 0) return;
 
-        // One archive: open it. Anything else (files, folders, several archives): offer to pack it.
+        // One archive: open it. Anything else (files, folders, several archives): add it to the open archive, or pack it.
         if (paths.Count == 1 && File.Exists(paths[0]) && IsReadableArchive(paths[0]))
+        {
             await LoadAsync(paths[0]);
+            return;
+        }
+        if (_listing is not null && EditProblem() is null)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = paths.Count == 1 ? $"Add {Path.GetFileName(Path.TrimEndingDirectorySeparator(paths[0]))}?" : $"Add {paths.Count} items?",
+                Content = $"Add to {Path.GetFileName(_listing.ArchivePath)}{(_current is { IsRoot: false } c ? $", in the {c.Name} folder" : "")}, or make a new archive from them?",
+                PrimaryButtonText = "Add to this archive",
+                SecondaryButtonText = "New archive",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = Root.XamlRoot,
+                RequestedTheme = Root.ActualTheme,
+            };
+            var choice = await dialog.ShowAsync();
+            if (choice == ContentDialogResult.Primary) await AddToArchiveAsync(paths);
+            else if (choice == ContentDialogResult.Secondary) await CreateArchiveAsync(paths);
+            return;
+        }
+        await CreateArchiveAsync(paths);
+    }
+
+    // ---------- Changing the open archive ----------
+
+    /// <summary>Why the open archive can't be changed, or null when it can.</summary>
+    private string? EditProblem() => _listing is null ? "No archive is open." : ArchiveEditor.WhyNotEditable(_listing);
+
+    private string CurrentFolderPath => FindBox.Text.Trim().Length == 0 && _current is { } c ? c.FullPath : "";
+
+    private async void AddIntoFiles_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || EditProblem() is not null) return;
+        var picker = new FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add("*");
+        var files = await picker.PickMultipleFilesAsync();
+        if (files is { Count: > 0 }) await AddToArchiveAsync(files.Select(f => f.Path).ToList());
+    }
+
+    private async void AddIntoFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy || EditProblem() is not null) return;
+        var folder = await PickFolderAsync();
+        if (folder is not null) await AddToArchiveAsync(new List<string> { folder });
+    }
+
+    /// <summary>Adds files and folders into the folder being shown, after asking about anything they would replace.</summary>
+    private async Task AddToArchiveAsync(IReadOnlyList<string> sources)
+    {
+        if (_listing is not { } listing || _busy) return;
+        if (EditProblem() is { } problem)
+        {
+            ShowMessage(InfoBarSeverity.Informational, "This archive can't be changed", problem);
+            return;
+        }
+        var into = CurrentFolderPath;
+
+        // New files are encrypted like the ones already there, which needs the archive's own password.
+        if (listing.Entries.Any(x => x.IsEncrypted))
+        {
+            if (!await EnsurePasswordAsync()) return;
+            var pw = _password!;
+            if (!await Task.Run(() => ArchiveEditor.PasswordOpens(listing, pw)))
+            {
+                _password = null;
+                ShowMessage(InfoBarSeverity.Error, "That password is wrong",
+                    "Files added with a different password would need two passwords to open. Try again with the archive's password.");
+                return;
+            }
+        }
+
+        var replaced = await Task.Run(() => ArchiveEditor.WouldReplace(listing, sources, into));
+        if (replaced.Count > 0)
+        {
+            var names = string.Join("\n", replaced.Take(8).Select(n => "• " + n)) + (replaced.Count > 8 ? $"\n…and {replaced.Count - 8:N0} more" : "");
+            if (!await ConfirmAsync($"Replace {replaced.Count:N0} {Plural(replaced.Count, "file")}?",
+                    $"These are already in the archive and will be replaced:\n{names}", "Replace")) return;
+        }
+
+        var password = _password;
+        await EditAsync("Adding…", (progress, token) =>
+        {
+            var result = ArchiveEditor.Add(listing, sources, into, password, progress, token);
+            var text = $"{result.FilesAdded:N0} {Plural(result.FilesAdded, "file")} added ({ArchiveService.FormatBytes(result.BytesAdded)})";
+            return result.Skipped.Count == 0 ? text
+                : text + $". {result.Skipped.Count:N0} skipped, e.g. {result.Skipped[0].Path}: {result.Skipped[0].Reason}";
+        });
+    }
+
+    private async void NewFolder_Click(object sender, RoutedEventArgs e)
+    {
+        if (_listing is not { } listing || _busy || EditProblem() is not null) return;
+        var parent = CurrentFolderPath;
+        var name = await AskNameAsync("New folder", "New folder", "Create");
+        if (name is null) return;
+        var password = _password;
+        string created = "";
+        await EditAsync("Creating the folder…", (_, token) =>
+        {
+            created = ArchiveEditor.NewFolder(listing, parent, name, password, token);
+            return $"Folder {name} created";
+        }, select: () => created);
+    }
+
+    private async void Rename_Click(object sender, RoutedEventArgs e)
+    {
+        if (_listing is not { } listing || _busy || EditProblem() is not null) return;
+        var selection = SelectedNodes();
+        if (selection.Count != 1 || selection[0].UnsafeReason is not null) return;
+        var node = selection[0];
+        var newName = await AskNameAsync(node.IsFolder ? "Rename folder" : "Rename file", node.Name, "Rename");
+        if (newName is null || newName == node.Name) return;
+        var password = _password;
+        var renamed = ArchivePaths.ParentOf(node.FullPath) is { Length: > 0 } p ? p + "/" + newName : newName;
+        await EditAsync("Renaming…", (_, token) =>
+        {
+            ArchiveEditor.Rename(listing, node.FullPath, newName, password, token);
+            return $"{node.Name} renamed to {newName}";
+        }, select: () => renamed);
+    }
+
+    private async void Delete_Click(object sender, RoutedEventArgs e) => await DeleteSelectedAsync();
+
+    private async Task DeleteSelectedAsync()
+    {
+        if (_listing is not { } listing || _busy || EditProblem() is not null) return;
+        var selection = SelectedNodes().Where(n => n.UnsafeReason is null).ToList();
+        if (selection.Count == 0) return;
+        int files = selection.Sum(n => n.IsFolder ? n.FileCount : 1);
+        var what = selection.Count == 1 ? selection[0].Name : $"{selection.Count:N0} items";
+        if (!await ConfirmAsync($"Delete {what} from the archive?",
+                $"{files:N0} {Plural(files, "file")} will be removed from {Path.GetFileName(listing.ArchivePath)}. This can't be undone.", "Delete")) return;
+
+        var password = _password;
+        var paths = selection.Select(n => n.FullPath).ToList();
+        await EditAsync("Deleting…", (_, token) =>
+        {
+            ArchiveEditor.Delete(listing, paths, password, token);
+            return $"{what} deleted";
+        });
+    }
+
+    /// <summary>
+    /// Runs one change to the archive, then reads it again and goes back to the folder that was showing.
+    /// <paramref name="work"/> returns the message to show when it worked.
+    /// </summary>
+    private async Task EditAsync(string busyText, Func<IProgress<ExtractProgress>, CancellationToken, string> work, Func<string>? select = null)
+    {
+        if (_listing is not { } listing) return;
+        var folder = CurrentFolderPath;
+        var password = _password;
+        HideMessage();
+        SetBusy(busyText);
+        var token = NewToken();
+        var progress = new Progress<ExtractProgress>(p => BusyText.Text = $"{busyText}  {ArchiveService.FormatBytes(p.BytesWritten)}   {p.CurrentEntry}");
+        string? done = null;
+        try
+        {
+            done = await Task.Run(() => work(progress, token), token);
+        }
+        catch (OperationCanceledException)
+        {
+            ShowMessage(InfoBarSeverity.Informational, "Cancelled", "The archive was left as it was.");
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            ShowMessage(InfoBarSeverity.Error, "Couldn't change the archive", ex.Message);
+        }
+        finally
+        {
+            SetBusy(null);
+        }
+
+        await LoadAsync(listing.ArchivePath, password);
+        if (_root is not null && ArchiveTree.FindFolder(_root, folder) is { } back && back != _root)
+        {
+            _current = back;
+            Refresh();
+        }
+        if (select?.Invoke() is { Length: > 0 } path)
+        {
+            var row = _rows.FirstOrDefault(r => r.Node is { } n && string.Equals(n.FullPath, path, StringComparison.OrdinalIgnoreCase));
+            if (row is not null)
+            {
+                EntryList.SelectedItem = row;
+                EntryList.ScrollIntoView(row);
+            }
+        }
+        if (done is not null) ShowMessage(InfoBarSeverity.Success, "Done", done);
+    }
+
+    private async Task<bool> ConfirmAsync(string title, string message, string action)
+    {
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap },
+            PrimaryButtonText = action,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Root.XamlRoot,
+            RequestedTheme = Root.ActualTheme,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
+    /// <summary>Asks for a file or folder name until it is one an archive can hold, or the person cancels.</summary>
+    private async Task<string?> AskNameAsync(string title, string initial, string action)
+    {
+        var box = new TextBox { Text = initial };
+        box.Loaded += (_, _) =>
+        {
+            box.Focus(FocusState.Programmatic);
+            var dot = initial.LastIndexOf('.');
+            box.Select(0, dot > 0 ? dot : initial.Length);   // the name, not the extension, as in File Explorer
+        };
+        var problem = new TextBlock { Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(Windows.UI.Color.FromArgb(255, 209, 52, 56)), TextWrapping = TextWrapping.Wrap };
+        var panel = new StackPanel { Spacing = 8, MinWidth = 360 };
+        panel.Children.Add(box);
+        panel.Children.Add(problem);
+        var dialog = new ContentDialog
+        {
+            Title = title,
+            Content = panel,
+            PrimaryButtonText = action,
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = Root.XamlRoot,
+            RequestedTheme = Root.ActualTheme,
+        };
+        string? accepted = null;
+        dialog.PrimaryButtonClick += (_, args) =>
+        {
+            try { accepted = ArchiveEditor.ValidateName(box.Text); }
+            catch (ArgumentException ex)
+            {
+                problem.Text = ex.Message;
+                args.Cancel = true;
+            }
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary ? accepted : null;
+    }
+
+    private void EntryList_ContextRequested(UIElement sender, ContextRequestedEventArgs e)
+    {
+        if (_listing is null) return;
+        // Right-clicking a row that isn't selected acts on that row alone, as in File Explorer.
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is EntryRow { IsParent: false } row && !EntryList.SelectedItems.Contains(row))
+            EntryList.SelectedItem = row;
+
+        var selection = SelectedNodes();
+        bool editable = !_busy && EditProblem() is null;
+        var menu = new MenuFlyout();
+        void Item(string text, string glyph, bool enabled, RoutedEventHandler click)
+        {
+            var item = new MenuFlyoutItem { Text = text, Icon = new FontIcon { Glyph = glyph }, IsEnabled = enabled };
+            item.Click += click;
+            menu.Items.Add(item);
+        }
+        Item("Extract to…", "\uE896", !_busy, Extract_Click);
+        Item("View", "\uE8A7", !_busy && selection.Count == 1 && !selection[0].IsFolder, View_Click);
+        menu.Items.Add(new MenuFlyoutSeparator());
+        Item("Rename…", "\uE8AC", editable && selection.Count == 1 && selection[0].UnsafeReason is null, Rename_Click);
+        Item("Delete from archive", "\uE74D", editable && selection.Count > 0, Delete_Click);
+        Item("New folder…", "\uE8F4", editable, NewFolder_Click);
+        Item("Add files here…", "\uE8A5", editable, AddIntoFiles_Click);
+
+        if (e.TryGetPosition(EntryList, out var point))
+            menu.ShowAt(EntryList, new FlyoutShowOptions { Position = point });
         else
-            await CreateArchiveAsync(paths);
+            menu.ShowAt(EntryList);
+        e.Handled = true;
+    }
+
+    // ---------- Dragging files out ----------
+
+    private static string DragRoot => Path.Combine(Path.GetTempPath(), "Arca", "Drag");
+
+    /// <summary>
+    /// Offers the dragged rows as files. Nothing is extracted until they are dropped somewhere (delayed rendering):
+    /// then they go to a scratch folder, through the same safety checks as Extract, and Explorer copies them from there.
+    /// </summary>
+    private void EntryList_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        var nodes = e.Items.OfType<EntryRow>().Where(r => r.Node is { UnsafeReason: null }).Select(r => r.Node!).ToList();
+        if (_listing is not { } listing || _busy || nodes.Count == 0)
+        {
+            e.Cancel = true;
+            return;
+        }
+        if (_password is null && nodes.SelectMany(n => n.IsFolder ? n.Descendants().Prepend(n) : new[] { n }).Any(n => n.IsEncrypted))
+        {
+            e.Cancel = true;
+            ShowMessage(InfoBarSeverity.Informational, "These files need the password",
+                "Use Extract To for password-protected files: it asks for the password first. After that, dragging works too.");
+            return;
+        }
+
+        var options = new ExtractOptions
+        {
+            Password = _password,
+            Only = nodes.Select(n => n.FullPath).ToList(),
+            StripPrefix = FindBox.Text.Trim().Length == 0 ? _current?.FullPath : null,
+            PropagateMarkOfTheWeb = _settings.KeepInternetMark,
+        };
+        _draggingOut = true;
+        e.Data.RequestedOperation = DataPackageOperation.Copy;
+        e.Data.SetDataProvider(StandardDataFormats.StorageItems, async request =>
+        {
+            var deferral = request.GetDeferral();
+            try
+            {
+                var folder = Path.Combine(DragRoot, Guid.NewGuid().ToString("N"));
+                var result = await Task.Run(() => ArchiveService.Extract(listing.ArchivePath, folder, options));
+                var items = new List<IStorageItem>();
+                foreach (var dir in Directory.EnumerateDirectories(result.Destination))
+                    items.Add(await StorageFolder.GetFolderFromPathAsync(dir));
+                foreach (var file in Directory.EnumerateFiles(result.Destination))
+                    items.Add(await StorageFile.GetFileFromPathAsync(file));
+                request.SetData(items);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                DispatcherQueue.TryEnqueue(() => ShowMessage(InfoBarSeverity.Error, "Couldn't drag those files out", ex.Message));
+            }
+            finally
+            {
+                deferral.Complete();
+            }
+        });
+    }
+
+    private void EntryList_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args) => _draggingOut = false;
+
+    /// <summary>Scratch copies from earlier drags; Explorer has long finished copying them by the next day.</summary>
+    private static void CleanOldDragFiles()
+    {
+        try
+        {
+            if (!Directory.Exists(DragRoot)) return;
+            foreach (var dir in Directory.EnumerateDirectories(DragRoot))
+            {
+                try
+                {
+                    if (Directory.GetCreationTimeUtc(dir) < DateTime.UtcNow.AddDays(-1)) Directory.Delete(dir, recursive: true);
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
     }
 }

@@ -18,6 +18,13 @@ public static class Program
     {
         if (Cli.TryRun(args) is int exitCode) return exitCode;
 
+        if (ShellRequest.Parse(args) is { } request)
+        {
+            // Before any window: another Arca may already be collecting this selection.
+            App.ShellRequest = request.Gather();
+            if (App.ShellRequest is null) return 0;
+        }
+
         try
         {
             WinRT.ComWrappersSupport.InitializeComWrappers();

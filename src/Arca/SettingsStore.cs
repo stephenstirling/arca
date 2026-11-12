@@ -13,6 +13,9 @@ public sealed class ArcaSettings
 
     /// <summary>Copy the archive's "downloaded from the internet" mark onto extracted files.</summary>
     public bool KeepInternetMark { get; set; } = true;
+
+    /// <summary>Show Arca's entries in File Explorer's right-click menu.</summary>
+    public bool ExplorerMenu { get; set; } = true;
 }
 
 public static class SettingsStore
