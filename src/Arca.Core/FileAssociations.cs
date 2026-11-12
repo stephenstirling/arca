@@ -57,4 +57,52 @@ public static class FileAssociations
         }
         return entries;
     }
+
+    /// <summary>
+    /// The right-click menu entries in File Explorer, which run Arca with a verb and one path (Explorer starts one
+    /// Arca per selected item; Arca gathers them into one window). An "Arca" submenu on archives, "Add to archive"
+    /// on every file and folder. On Windows 11 these sit under "Show more options".
+    /// </summary>
+    public static IReadOnlyList<RegistryEntry> ContextMenuPlan(string exePath)
+    {
+        string icon = $"\"{exePath}\",0";
+        string Run(string verb) => $"\"{exePath}\" {verb} \"%1\"";
+        var entries = new List<RegistryEntry>();
+
+        foreach (var ext in Extensions)
+        {
+            var menu = ArchiveMenuKey(ext);
+            entries.Add(new(menu, "MUIVerb", "Arca"));
+            entries.Add(new(menu, "Icon", icon));
+            entries.Add(new(menu, "SubCommands", ""));
+            AddVerb(menu + @"\shell\1ExtractHere", "Extract here", Run("e"));
+            AddVerb(menu + @"\shell\2ExtractTo", "Extract to a folder", Run("x"));
+            AddVerb(menu + @"\shell\3Open", "Open in Arca", $"\"{exePath}\" \"%1\"", multi: false);
+        }
+        AddVerb(AddToArchiveKeys[0], "Add to archive with Arca…", Run("a"));
+        AddVerb(AddToArchiveKeys[1], "Add to archive with Arca…", Run("a"));
+        return entries;
+
+        void AddVerb(string key, string text, string command, bool multi = true)
+        {
+            entries.Add(new(key, "MUIVerb", text));
+            entries.Add(new(key, "Icon", icon));
+            // "Player" lifts Explorer's 15-item limit on how many selected files a static verb runs for.
+            if (multi) entries.Add(new(key, "MultiSelectModel", "Player"));
+            entries.Add(new(key + @"\command", "", command));
+        }
+    }
+
+    /// <summary>Every key <see cref="ContextMenuPlan"/> creates at its top, for removing the menu again.</summary>
+    public static IReadOnlyList<string> ContextMenuKeys =>
+        [.. Extensions.Select(ArchiveMenuKey), .. AddToArchiveKeys];
+
+    /// <summary>SystemFileAssociations, so the submenu shows whichever program the person made the default for that type.</summary>
+    private static string ArchiveMenuKey(string extension) => $@"Software\Classes\SystemFileAssociations\{extension}\shell\Arca";
+
+    private static readonly string[] AddToArchiveKeys =
+    [
+        @"Software\Classes\*\shell\ArcaAdd",
+        @"Software\Classes\Directory\shell\ArcaAdd",
+    ];
 }

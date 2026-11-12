@@ -87,6 +87,16 @@
                     <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control" Key="I" /></MenuFlyoutItem.KeyboardAccelerators>
                 </MenuFlyoutItem>
                 <MenuFlyoutItem Text="Scan with Microsoft Defender" Click="Scan_Click" />
+                <MenuFlyoutSeparator />
+                <MenuFlyoutItem x:Name="AddIntoFilesMenuItem" Text="Add files to this archive…" Click="AddIntoFiles_Click" />
+                <MenuFlyoutItem x:Name="AddIntoFolderMenuItem" Text="Add a folder to this archive…" Click="AddIntoFolder_Click" />
+                <MenuFlyoutItem x:Name="NewFolderMenuItem" Text="New folder…" Click="NewFolder_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Modifiers="Control,Shift" Key="N" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="RenameMenuItem" Text="Rename…" Click="Rename_Click">
+                    <MenuFlyoutItem.KeyboardAccelerators><KeyboardAccelerator Key="F2" /></MenuFlyoutItem.KeyboardAccelerators>
+                </MenuFlyoutItem>
+                <MenuFlyoutItem x:Name="DeleteMenuItem" Text="Delete from archive" Click="Delete_Click" />
             </MenuBarItem>
             <MenuBarItem Title="Options">
                 <MenuFlyoutSubItem Text="Theme">
@@ -97,6 +107,7 @@
                 <MenuFlyoutSeparator />
                 <ToggleMenuFlyoutItem x:Name="SmartFolderItem" Text="Extract all: new folder when needed" Click="Option_Click" />
                 <ToggleMenuFlyoutItem x:Name="KeepMarkItem" Text="Keep the &quot;downloaded from the internet&quot; mark" Click="Option_Click" />
+                <ToggleMenuFlyoutItem x:Name="ExplorerMenuItem" Text="Show Arca in File Explorer's right-click menu" Click="ExplorerMenu_Click" />
                 <MenuFlyoutSeparator />
                 <MenuFlyoutItem Text="Make Arca the default for archives…" Click="DefaultApps_Click" />
             </MenuBarItem>
@@ -119,7 +130,7 @@
                         <Button Style="{StaticResource ToolButtonStyle}" Click="Open_Click" ToolTipService.ToolTip="Open an archive (Ctrl+O)">
                             <StackPanel><FontIcon Glyph="&#xED25;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Open" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
                         </Button>
-                        <Button x:Name="AddButton" Style="{StaticResource ToolButtonStyle}" ToolTipService.ToolTip="Make a new archive from files or a folder (you can also drop them on this window)">
+                        <Button x:Name="AddButton" Style="{StaticResource ToolButtonStyle}" ToolTipService.ToolTip="Make a new archive, or add to the open one (you can also drop files on this window)">
                             <Button.Flyout>
                                 <MenuFlyout Placement="Bottom">
                                     <MenuFlyoutItem Text="Files…" Click="AddFiles_Click">
@@ -128,6 +139,9 @@
                                     <MenuFlyoutItem Text="A folder…" Click="AddFolder_Click">
                                         <MenuFlyoutItem.Icon><FontIcon Glyph="&#xE8B7;" /></MenuFlyoutItem.Icon>
                                     </MenuFlyoutItem>
+                                    <MenuFlyoutSeparator />
+                                    <MenuFlyoutItem x:Name="AddIntoFilesItem" Text="Files into this archive…" Click="AddIntoFiles_Click" />
+                                    <MenuFlyoutItem x:Name="AddIntoFolderItem" Text="A folder into this archive…" Click="AddIntoFolder_Click" />
                                 </MenuFlyout>
                             </Button.Flyout>
                             <StackPanel><FontIcon Glyph="&#xE710;" Style="{StaticResource ToolIconStyle}" /><TextBlock Text="Add" Style="{StaticResource ToolLabelStyle}" /></StackPanel>
@@ -230,6 +244,8 @@
                         </Grid>
 
                         <ListView x:Name="EntryList" Grid.Row="1" SelectionMode="Extended" IsDoubleTapEnabled="True"
+                                  CanDragItems="True" DragItemsStarting="EntryList_DragItemsStarting" DragItemsCompleted="EntryList_DragItemsCompleted"
+                                  ContextRequested="EntryList_ContextRequested"
                                   DoubleTapped="EntryList_DoubleTapped" SelectionChanged="EntryList_SelectionChanged"
                                   KeyDown="EntryList_KeyDown" AutomationProperties.Name="Files in the archive">
                             <ListView.ItemContainerStyle>

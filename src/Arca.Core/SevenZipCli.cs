@@ -86,7 +86,21 @@ internal static class SevenZipCli
         return args;
     }
 
-    private static void Run(
+    /// <summary>
+    /// Runs 7za for a change to an existing archive (delete, rename) and throws with 7-Zip's own message when it fails.
+    /// The password, if any, goes through stdin as when creating.
+    /// </summary>
+    internal static void Execute(string exe, string workingDirectory, List<string> args, string? password, CancellationToken cancellationToken)
+    {
+        if (!File.Exists(exe))
+            throw new IOException("Arca's copy of 7-Zip (7-Zip\\7za.exe) is missing, so it can't change archives. Reinstalling Arca from Integra puts it back.");
+        var result = new CreateResult();
+        Run(exe, workingDirectory, args, password, 0, result, null, cancellationToken);
+        if (result.Skipped.Count > 0)
+            throw new IOException("7-Zip couldn't finish: " + result.Skipped[0].Reason);
+    }
+
+    internal static void Run(
         string exe, string workingDirectory, List<string> args, string? password, long totalBytes,
         CreateResult result, IProgress<ExtractProgress>? progress, CancellationToken cancellationToken)
     {
@@ -111,7 +125,9 @@ internal static class SevenZipCli
         });
 
         // "\n" alone: 7za ends the password at the newline, and a "\r" before it would become part of the password if stdin isn't in text mode.
-        if (!string.IsNullOrEmpty(password)) process.StandardInput.Write(password + "\n");
+        // Sent twice: adding to an archive whose names are hidden asks once to open it and once for what is added.
+        // A line 7za doesn't ask for is never read.
+        if (!string.IsNullOrEmpty(password)) process.StandardInput.Write(password + "\n" + password + "\n");
         process.StandardInput.Close();
 
         var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
@@ -146,7 +162,7 @@ internal static class SevenZipCli
             case 8:
                 throw new IOException("7-Zip ran out of memory. Try a lower compression level.");
             default:
-                throw new IOException("7-Zip couldn't create the archive" + (stderr.Length > 0 ? ": " + stderr : $" (exit code {process.ExitCode})."));
+                throw new IOException("7-Zip couldn't change the archive" + (stderr.Length > 0 ? ": " + stderr : $" (exit code {process.ExitCode})."));
         }
     }
 

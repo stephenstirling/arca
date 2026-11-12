@@ -18,7 +18,10 @@ internal static class Associations
         try
         {
             bool changed = false;
-            foreach (var entry in FileAssociations.Plan(exe))
+            var plan = FileAssociations.Plan(exe).ToList();
+            if (SettingsStore.Load().ExplorerMenu) plan.AddRange(FileAssociations.ContextMenuPlan(exe));
+            else changed = RemoveExplorerMenu();
+            foreach (var entry in plan)
             {
                 using var key = Registry.CurrentUser.CreateSubKey(entry.Key, writable: true);
                 if (key.GetValue(entry.Name) as string == entry.Value) continue;
@@ -33,10 +36,36 @@ internal static class Associations
         }
     }
 
+    /// <summary>Takes Arca out of File Explorer's right-click menu; true when there was something to remove.</summary>
+    public static bool RemoveExplorerMenu()
+    {
+        bool removed = false;
+        foreach (var key in FileAssociations.ContextMenuKeys)
+        {
+            using (var existing = Registry.CurrentUser.OpenSubKey(key)) removed |= existing is not null;
+            Registry.CurrentUser.DeleteSubKeyTree(key, throwOnMissingSubKey: false);
+        }
+        return removed;
+    }
+
+    /// <summary>Applies the Explorer-menu setting now, rather than at the next start.</summary>
+    public static void ApplyExplorerMenu(bool on)
+    {
+        try
+        {
+            if (on) Register();
+            else if (RemoveExplorerMenu()) NotifyShell();
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or System.Security.SecurityException)
+        {
+        }
+    }
+
     /// <summary>Removes everything <see cref="Register"/> wrote. Leaves the user's own default choice alone, which Windows owns.</summary>
     public static void Unregister()
     {
         var hkcu = Registry.CurrentUser;
+        RemoveExplorerMenu();
         hkcu.DeleteSubKeyTree(FileAssociations.ProgIdKey, throwOnMissingSubKey: false);
         hkcu.DeleteSubKeyTree(FileAssociations.ApplicationKey, throwOnMissingSubKey: false);
         hkcu.DeleteSubKeyTree(FileAssociations.CapabilitiesKey, throwOnMissingSubKey: false);
