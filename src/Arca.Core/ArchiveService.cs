@@ -303,7 +303,10 @@ public static class ArchiveService
             return false;
         }
 
-        if (set.Kind == VolumeKind.Split)
+        // Arca opens the file itself rather than handing SharpCompress the path: when the archive fails to open
+        // (a wrong password, a damaged header) SharpCompress's own handle would stay open until garbage collection,
+        // locking the file against 7-Zip and Explorer.
+        if (set.Kind is VolumeKind.Split or VolumeKind.Single)
         {
             using var stream = OpenWhole(set);
             using var joined = ArchiveFactory.Open(stream, readerOptions);
