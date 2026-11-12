@@ -125,7 +125,9 @@ internal static class SevenZipCli
         });
 
         // "\n" alone: 7za ends the password at the newline, and a "\r" before it would become part of the password if stdin isn't in text mode.
-        if (!string.IsNullOrEmpty(password)) process.StandardInput.Write(password + "\n");
+        // Sent twice: adding to an archive whose names are hidden asks once to open it and once for what is added.
+        // A line 7za doesn't ask for is never read.
+        if (!string.IsNullOrEmpty(password)) process.StandardInput.Write(password + "\n" + password + "\n");
         process.StandardInput.Close();
 
         var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
