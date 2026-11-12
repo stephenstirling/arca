@@ -20,7 +20,7 @@ public static class ArchiveEditor
         return listing.Format switch
         {
             ArchiveFormat.Zip or ArchiveFormat.SevenZip or ArchiveFormat.Tar => null,
-            ArchiveFormat.Rar => "RAR archives can only be changed with WinRAR. Extract it and make a ZIP or 7Z instead.",
+            ArchiveFormat.Rar4 or ArchiveFormat.Rar5 => "RAR archives can only be changed with WinRAR. Extract it and make a ZIP or 7Z instead.",
             ArchiveFormat.Gzip or ArchiveFormat.Bzip2 or ArchiveFormat.Xz =>
                 "Compressed TAR archives (.tar.gz, .tar.bz2, .tar.xz) can't be changed in place. Extract it and make a new archive instead.",
             _ => $"{ArchiveFormats.DisplayName(listing.Format)} archives can't be changed.",
