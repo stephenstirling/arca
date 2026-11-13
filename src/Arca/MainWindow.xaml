@@ -301,7 +301,7 @@
                     <FontIcon Glyph="&#xE8B7;" FontSize="40" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" />
                     <TextBlock Text="Drop an archive here to open it, or files and folders to pack them." HorizontalAlignment="Center"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock Text="Opens ZIP, 7z, RAR, RAR5, TAR, GZ, BZ2 and XZ · creates ZIP, TAR, TAR.GZ and TAR.BZ2" HorizontalAlignment="Center" FontSize="12"
+                    <TextBlock Text="Opens ZIP, 7z, RAR, RAR5, TAR, GZ, BZ2 and XZ · creates ZIP, 7z, TAR, TAR.GZ and TAR.BZ2" HorizontalAlignment="Center" FontSize="12"
                                Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                 </StackPanel>
             </Grid>
